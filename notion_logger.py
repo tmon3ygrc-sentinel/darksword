@@ -1,7 +1,6 @@
 """
-🛡️ STAR CPE LOGGER V5.3 — PROJECT DARKSWORD
-Integrated for CMMC 2.0 & NIST 800-171
-Schema-verified. Hashtag-stripped. Defaults applied.
+🛡️ STAR CPE LOGGER V5.4 — PROJECT DARKSWORD
+Standardized for GRC & 50-Week Learning Plan Integration
 """
 
 import os
@@ -12,319 +11,184 @@ from typing import List, Dict
 from notion_client import Client
 from dotenv import load_dotenv
 
-# ─── CONFIGURATION ────────────────────────────────────────────────────────────
-
+# ===================================================================
+# 1. CONFIGURATION & DIRECTORIES
+# ===================================================================
 SCRIPT_DIR = Path(__file__).parent.absolute()
 load_dotenv(dotenv_path=SCRIPT_DIR / ".env")
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-DATABASE_ID  = os.getenv("DATABASE_ID")
+DATABASE_ID  = os.getenv("DATABASE_ID") # Daily Threat Brief DB
 CMMC_DB_ID   = os.getenv("CMMC_DATABASE_ID")
 
-notion = Client(auth=NOTION_TOKEN)
-
 if not NOTION_TOKEN or not DATABASE_ID:
-    raise ValueError("❌ NOTION_TOKEN or DATABASE_ID missing from .env")
+    raise ValueError("❌ Critical Environment Variables missing from .env")
 
-# ─── SCHEMA (verified against live Notion database) ───────────────────────────
+notion = Client(auth=NOTION_TOKEN)
+print("✅ Notion client initialized")
 
-FIELD_FIXES = {
-    "impacted_identity":   "impacted_identity_provider",
-    "impacted_identitty":  "impacted_identity_provider",
-    "exploit_maturity":    "exploit_maturity",
-    "executive_summary":   "executive_summary",
-    "cmmc_mappings":       "cmmc_mapping",
-    "tag":                 "tags",
-    "intel_datee":         "intel_date",
-    "kill_chaiin_phase":   "kill_chain_phase",
+# ===================================================================
+# 2. THE "NICKNAME" CACHE (Manual Entry Required)
+# ===================================================================
+# Paste the Page IDs for your Learning Plan weeks here. 
+# You only have to do this once!
+LEARNING_CACHE = {
+    "Week 25": "2d655ed740388178af99d35ef1ba8c60",
+    "Week 26": "2d655ed7403881ffb921d8538a552713",
+    "Week 27": "2d655ed74038811b88f7f71eb26aaa36",
 }
-
-SELECT = {
-    "content_category",
-    "exploit_maturity",
-    "source",
-    "story_type",
-    "response_urgency",
-    "asset_criticality",
-    "active_exploitation",
-    "confidence",
-    "cisa_kev",
-    "intel_type",
-}
-
-MULTI_SELECT = {
-    "detection_opportunities",
-    "attack_tactic",
-    "identity_impact",
-    "dfir_phase",
-    "content_type",
-    "cpe_category",
-    "tags",
-    "kill_chain_phase",
-    "impacted_identity_provider",
-    "attack_techniques",
-    "target_sector",
-    "threat_actor",
-    "investigation_type",
-    "priority_level",
-    "intel_category",
-    "control_domains",
-}
-
-DATE_FIELDS = {
-    "intel_date",
-    "intel_timestamp",
-}
-
-RICH_TEXT_FIELDS = {
-    "key_takeaways",
-    "executive_summary",
-    "operational_relevance",
-}
-
-SKIP = {
-    "record_id",
-    "url",
-    "title",
-    "date_watched",
-    "cpe_credits",
-    "cmmc_mapping",
-    "learning_phase",
-}
-
-# ─── UTILITIES ────────────────────────────────────────────────────────────────
-
-def to_text(val) -> list:
-    return [{"text": {"content": str(val)[:2000]}}] if val else []
-
-def to_select(val) -> dict | None:
-    return {"name": str(val).strip()} if val else None
-
-def to_multi(val) -> list:
-    if isinstance(val, str):
-        items = [x.strip().lstrip('#') for x in val.split(",")]
-    else:
-        items = [str(x).lstrip('#') for x in list(val)]
-    return [{"name": i} for i in items if i]
-
-def scrub(text: str) -> str:
-    text = re.sub(r'```[^\n]*\n?', '', text)
-    text = re.sub(r'[`*]', '', text)
-    return text
-
-# ─── CMMC CACHE (paginated) ───────────────────────────────────────────────────
 
 CMMC_CACHE: Dict[str, str] = {}
 
+# ===================================================================
+# 3. FIELD MAPPINGS (GRC Standards)
+# ===================================================================
+SELECT_FIELDS = {
+    "content_category", "exploit_maturity", "source", "story_type",
+    "response_urgency", "asset_criticality", "active_exploitation",
+    "confidence", "cisa_kev", "intel_type"
+}
+
+MULTI_SELECT_FIELDS = {
+    "detection_opportunities", "attack_tactic", "identity_impact",
+    "content_type", "cpe_category", "tags", "kill_chain_phase", 
+    "impacted_identity_provider", "attack_techniques", "target_sector", 
+    "threat_actor", "priority_level", "intel_category", "control_domains"
+}
+
+RICH_TEXT_FIELDS = {"key_takeaways", "executive_summary", "operational_relevance"}
+SKIP_FIELDS = {"record_id", "url", "title", "cpe_credits", "cmmc_mapping", "learning_phase"}
+
+# ===================================================================
+# 4. SYSTEM FUNCTIONS
+# ===================================================================
+
 def load_cmmc_cache():
-    if not CMMC_DB_ID:
-        return
-    print("📡 Loading CMMC framework cache...")
-    CMMC_CACHE.clear()
-    has_more = True
-    next_cursor = None
-    page_count = 0
-
+    """Loads CMMC Control IDs into memory for instant mapping."""
+    if not CMMC_DB_ID: return
+    print("📡 Loading CMMC cache...")
     try:
-        while has_more:
-            res = notion.databases.query(
-                database_id=CMMC_DB_ID,
-                start_cursor=next_cursor
-            )
-            page_count += 1
-            for page in res["results"]:
-                title_prop = page["properties"].get("Name", {}).get("title", [])
-                if title_prop:
-                    control_id = title_prop[0]["plain_text"].strip()
-                    CMMC_CACHE[control_id] = page["id"]
-
-            has_more = res.get("has_more", False)
-            next_cursor = res.get("next_cursor")
-            print(f"  📄 Page {page_count} loaded — {len(CMMC_CACHE)} controls so far...")
-
-        print(f"✅ CMMC cache fully loaded: {len(CMMC_CACHE)} controls")
-
+        # Standardized Database Query (Fixes 'Invalid Request URL')
+        res = notion.databases.query(database_id=CMMC_DB_ID)
+        for page in res.get("results", []):
+            title_props = page["properties"].get("Name", {}).get("title", [])
+            if title_props:
+                cid = title_props[0].get("plain_text", "").strip()
+                CMMC_CACHE[cid] = page["id"]
+        print(f"✅ CMMC cache loaded: {len(CMMC_CACHE)} controls")
     except Exception as e:
-        print(f"❌ Failed to load CMMC framework: {e}")
-
-# ─── GRC WRITE-BACK ───────────────────────────────────────────────────────────
+        print(f"❌ CMMC cache failed: {e}")
 
 def update_compliance_status(control_ids: List[str], log_page_url: str):
-    """Updates the Master Frameworks database to link evidence and flag status."""
+    """Writes back to the CMMC database to mark evidence."""
     for cid in control_ids:
-        # Check if the Control ID exists in the cache we just loaded
         if cid in CMMC_CACHE:
-            page_id = CMMC_CACHE[cid]
             try:
-                # This reaches back into the Framework DB to update the specific control
                 notion.pages.update(
-                    page_id=page_id,
+                    page_id=CMMC_CACHE[cid],
                     properties={
                         "Status": {"select": {"name": "Evidence Pending"}},
                         "Last Evidence": {"url": log_page_url}
                     }
                 )
-                print(f"📡 GRC UPDATE: {cid} marked 'Evidence Pending' with log link.")
+                print(f"📡 GRC UPDATE: {cid} → Evidence Pending")
             except Exception as e:
-                print(f"⚠️  GRC Update failed for {cid}: {e}")
-        else:
-            # This triggers if your text file has an ID that isn't in Notion yet
-            print(f"⚠️  GRC Skip: {cid} not found in CMMC Cache. No status updated.")
+                print(f"⚠️ GRC update failed for {cid}: {e}")
 
-# ─── PARSING ──────────────────────────────────────────────────────────────────
+# ===================================================================
+# 5. THE ENGINE (PUSH_RECORD)
+# ===================================================================
+
+def push_record(record: dict, source_label: str, url: str) -> bool:
+    record_id = record.get("record_id", "unknown")
+    page_title = f"{source_label} - {record_id}"
+
+    # Build Base Properties
+    props = {
+        "Title": {"title": [{"text": {"content": page_title}}]},        
+        "url": {"url": url if url else None},                          
+        "date_watched": {"date": {"start": date.today().isoformat()}},
+        "cpe_credits": {"number": 0.5},                                
+    }
+
+    # Map standard fields from .txt file
+    for key, val in record.items():
+        if key in SKIP_FIELDS or not val: continue
+        if key in SELECT_FIELDS:
+            props[key] = {"select": {"name": str(val).strip()}}
+        elif key in MULTI_SELECT_FIELDS:
+            items = [x.strip() for x in str(val).split(",")]
+            props[key] = {"multi_select": [{"name": i} for i in items if i]}
+        elif key in RICH_TEXT_FIELDS:
+            props[key] = {"rich_text": [{"text": {"content": str(val)[:2000]}}]}
+
+    # === CMMC Relations ===
+    cmmc_raw = record.get("cmmc_mapping", "")
+    if cmmc_raw:
+        cids = [x.strip() for x in cmmc_raw.split(",") if x.strip()]
+        rels = [{"id": CMMC_CACHE[cid]} for cid in cids if cid in CMMC_CACHE]
+        if rels:
+            props["Master Frameworks(CMMC 2.0 / NIST 800-171)"] = {"relation": rels}
+
+    # === Learning Plan Relation (The "Nickname" Fix) ===
+    learning_raw = record.get("learning_phase", "")
+    if learning_raw:
+        # Extract "Week 26" from "Week 26 – Building compliance programs"
+        phase_key = learning_raw.split(" – ")[0].strip()
+        if phase_key in LEARNING_CACHE:
+            props["GRC_Learning_Plan_All_Phases"] = {"relation": [{"id": LEARNING_CACHE[phase_key]}]}
+            print(f"    🔗 Linked to Learning Plan: {phase_key}")
+# === TEMPORARY DEBUG: Run this once to see your column names ===
+#    print("\n🔍 NOTION COLUMN NAMES DETECTED:")
+#    print(list(notion.databases.retrieve(database_id=DATABASE_ID).get("properties").keys()))
+#    import sys; sys.exit() # This stops the script so you can read the list
+    try:
+        response = notion.pages.create(
+            parent={"database_id": DATABASE_ID},
+            properties=props
+        )
+        log_url = response.get("url")
+        if cmmc_raw and log_url:
+            update_compliance_status([x.strip() for x in cmmc_raw.split(",") if x.strip()], log_url)
+        print(f"✅ Logged: {record_id}")
+        return True
+    except Exception as e:
+        print(f"❌ Failed: {record_id} | {e}")
+        return False
+
+# ===================================================================
+# 6. PARSER & MAIN
+# ===================================================================
 
 def parse_records(file_path: Path) -> List[dict]:
-    if not file_path.exists():
-        print(f"❌ Input file not found: {file_path}")
-        return []
-
-    content = scrub(file_path.read_text(encoding="utf-8"))
-    blocks = re.findall(
-        r'===INTEL_RECORD_START===(.*?)===INTEL_RECORD_END===',
-        content, re.DOTALL
-    )
-
+    if not file_path.exists(): return []
+    content = file_path.read_text(encoding="utf-8")
+    blocks = re.findall(r'===INTEL_RECORD_START===(.*?)===INTEL_RECORD_END===', content, re.DOTALL)
     records = []
     for block in blocks:
         raw = {}
         for line in block.strip().split('\n'):
             if '::' in line:
                 k, v = line.split('::', 1)
-                raw_key = k.strip()
-                clean_key = FIELD_FIXES.get(raw_key, raw_key)
-                raw[clean_key] = v.strip()
-        if raw.get('record_id'):
-            records.append(raw)
-
+                raw[k.strip()] = v.strip()
+        if raw.get('record_id'): records.append(raw)
     return records
 
-# ─── PUSH TO NOTION ───────────────────────────────────────────────────────────
-
-def push_record(record: dict, source_label: str, url: str) -> bool:
-    record_id = record.get("record_id", "unknown")
-
-    # Base properties with defaults for commonly missing fields
-    props = {
-        "Title":        {"title": to_text(f"{source_label} - {record_id}")},
-        "url":          {"url": url},
-        "date_watched": {"date": {"start": date.today().isoformat()}},
-        "cpe_credits":  {"number": 0.75 if "Simply" in source_label else 0.5},
-        "record_id":    {"rich_text": to_text(record_id)},
-        "cpe_category": {"multi_select": to_multi(record.get("cpe_category", "Technical"))},
-        "content_type": {"multi_select": to_multi(record.get("content_type", "Video"))},
-    }
-
-    # Process remaining fields
-    for key, val in record.items():
-        if key in SKIP or not val:
-            continue
-        if key in props:
-            continue
-
-        if key in SELECT:
-            props[key] = {"select": to_select(val)}
-
-        elif key in MULTI_SELECT:
-            props[key] = {"multi_select": to_multi(val)}
-
-        elif key in DATE_FIELDS:
-            props[key] = {"date": {"start": str(val)[:10]}}
-
-        elif key == "risk_severity_score":
-            try:
-                props[key] = {"number": float(val)}
-            except ValueError:
-                print(f"⚠️  Could not parse risk_severity_score: {val}")
-
-        elif key in RICH_TEXT_FIELDS:
-            props[key] = {"rich_text": to_text(val)}
-
-        else:
-            print(f"⚠️  Unknown field skipped: {repr(key)} = {repr(val)}")
-
-    # CMMC Relations
-    cmmc_raw = record.get("cmmc_mapping", "")
-    if cmmc_raw:
-        control_ids = [x.strip() for x in cmmc_raw.split(",") if x.strip()]
-        relations = [
-            {"id": CMMC_CACHE[cid]}
-            for cid in control_ids
-            if cid in CMMC_CACHE
-        ]
-        if relations:
-            props["Master Frameworks(CMMC 2.0 / NIST 800-171)"] = {"relation": relations}
-        missing = [cid for cid in control_ids if cid not in CMMC_CACHE]
-        if missing:
-            print(f"⚠️  CMMC IDs not found in cache: {missing}")
-
-    try:
-        # 1. Create the page and capture the response
-        response = notion.pages.create(
-            parent={"database_id": DATABASE_ID},
-            properties=props
-        )
-        
-        # 2. Get the new page URL for evidence linking
-        log_url = response.get("url")
-        
-        # 3. Trigger the GRC Write-Back (The "Evidence Blade")
-        if cmmc_raw and log_url:
-            control_ids = [x.strip() for x in cmmc_raw.split(",") if x.strip()]
-            update_compliance_status(control_ids, log_url)
-
-        print(f"✅ Logged: {record_id}")
-        return True
-
-    except Exception as e:
-        print(f"❌ Failed: {record_id} | {e}")
-        return False
-
-
-
-# ─── MAIN ─────────────────────────────────────────────────────────────────────
-
 def main():
-    print("\n" + "="*55)
-    print("🛡️  STAR CPE LOGGER V5.3 — PROJECT DARKSWORD")
-    print("="*55)
-
+    print("\n" + "="*60 + "\n🛡️ STAR CPE LOGGER V5.4 — PROJECT DARKSWORD\n" + "="*60)
+    load_cmmc_cache()
+    
     while True:
-        print("\n1. Simply Cyber  |  2. Barricade (DFIR)  |  3. Exit")
+        print("\n1. Daily Threat Brief\n2. Exit")
         choice = input("\nSelection: ").strip()
-
-        if choice == "3":
-            print("👋 Exiting.")
-            break
-
-        if choice not in ("1", "2"):
-            print("❌ Invalid selection.")
-            continue
-
-        is_dfir = (choice == "2")
-        source_label = "Barricade" if is_dfir else "Daily Threat Brief"
-        target_file = SCRIPT_DIR / ("barricade_input.txt" if is_dfir else "governance_input.txt")
-
+        if choice == "2": break
+        
         url = input("Source URL: ").strip()
-        if not url:
-            print("❌ URL required.")
-            continue
-
-        print(f"\n👉 Save AI output to: {target_file.name}")
-        input("Press ENTER when ready...")
-
-        load_cmmc_cache()
-
-        records = parse_records(target_file)
-        if not records:
-            print("⚠️  No records found. Check input file format.")
-            continue
-
-        print(f"\n🚀 Logging {len(records)} record(s)...")
-        success = sum(
-            push_record(r, source_label, url)
-            for r in records
-        )
-        print(f"\n📊 SUMMARY: {success}/{len(records)} logged successfully.")
+        input(f"Save AI output to governance_input.txt then press ENTER...")
+        
+        records = parse_records(SCRIPT_DIR / "governance_input.txt")
+        for r in records:
+            push_record(r, "Daily Threat Brief", url)
 
 if __name__ == "__main__":
     main()
