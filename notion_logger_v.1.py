@@ -46,18 +46,24 @@ CMMC_CACHE: Dict[str, str] = {}
 SELECT_FIELDS = {
     "content_category", "exploit_maturity", "source", "story_type",
     "response_urgency", "asset_criticality", "active_exploitation",
-    "confidence", "cisa_kev", "intel_type"
+    "confidence", "cisa_kev", "intel_type","source_show"
 }
 
 MULTI_SELECT_FIELDS = {
     "detection_opportunities", "attack_tactic", "identity_impact",
     "content_type", "cpe_category", "tags", "kill_chain_phase", 
     "impacted_identity_provider", "attack_techniques", "target_sector", 
-    "threat_actor", "priority_level", "intel_category", "control_domains"
+    "threat_actor", "priority_level", "intel_category", "control_domains", "dfir_phase", "investigation_type"
 }
 
-RICH_TEXT_FIELDS = {"key_takeaways", "executive_summary", "operational_relevance"}
-SKIP_FIELDS = {"record_id", "url", "title", "cpe_credits", "cmmc_mapping", "learning_phase"}
+RICH_TEXT_FIELDS = {"key_takeaways", "executive_summary", "operational_relevance", "record_id"
+}
+DATE_FIELDS   = {"intel_date", "intel_timestamp"}
+NUMBER_FIELDS = {"risk_severity_score"}
+SKIP_FIELDS = {"url", "title", "cpe_credits", "cmmc_mapping", "learning_phase",
+                "GRC_Learning_Plan_All_Phases",
+                "Master Frameworks(CMMC 2.0 / NIST 800-171)"
+}
 
 # ===================================================================
 # 4. SYSTEM FUNCTIONS
@@ -121,27 +127,35 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
             props[key] = {"multi_select": [{"name": i} for i in items if i]}
         elif key in RICH_TEXT_FIELDS:
             props[key] = {"rich_text": [{"text": {"content": str(val)[:2000]}}]}
+        elif key in DATE_FIELDS:                          # ← ADD
+            props[key] = {"date": {"start": str(val).strip()}}
+        elif key in NUMBER_FIELDS:                        # ← ADD
+            try: props[key] = {"number": float(val)}
+            except: pass
 
     # === CMMC Relations ===
-    cmmc_raw = record.get("cmmc_mapping", "")
+    cmmc_raw = record.get("Master Frameworks(CMMC 2.0 / NIST 800-171)", "")
     if cmmc_raw:
         cids = [x.strip() for x in cmmc_raw.split(",") if x.strip()]
         rels = [{"id": CMMC_CACHE[cid]} for cid in cids if cid in CMMC_CACHE]
         if rels:
             props["Master Frameworks(CMMC 2.0 / NIST 800-171)"] = {"relation": rels}
 
-    # === Learning Plan Relation (The "Nickname" Fix) ===
-    learning_raw = record.get("learning_phase", "")
+    # === Learning Plan Relation ===
+    learning_raw = record.get("GRC_Learning_Plan_All_Phases", "")
     if learning_raw:
-        # Extract "Week 26" from "Week 26 – Building compliance programs"
-        phase_key = learning_raw.split(" – ")[0].strip()
+        phase_key = re.split(r'\s[–-]\s', learning_raw)[0].strip()
         if phase_key in LEARNING_CACHE:
             props["GRC_Learning_Plan_All_Phases"] = {"relation": [{"id": LEARNING_CACHE[phase_key]}]}
-            print(f"    🔗 Linked to Learning Plan: {phase_key}")
+            print(f"    ✅ Linked to Learning Plan: {phase_key}")
+        else:
+            print(f"    ❌ NO MATCH — '{phase_key}' not found in cache!")
+    else:
+        print("    ⚠️ learning_phase field EMPTY or MISSING")
 # === TEMPORARY DEBUG: Run this once to see your column names ===
-#    print("\n🔍 NOTION COLUMN NAMES DETECTED:")
-#    print(list(notion.databases.retrieve(database_id=DATABASE_ID).get("properties").keys()))
-#    import sys; sys.exit() # This stops the script so you can read the list
+#   print("\n🔍 NOTION COLUMN NAMES DETECTED:")
+#   print(list(notion.databases.retrieve(database_id=DATABASE_ID).get("properties").keys()))
+#   import sys; sys.exit() # This stops the script so you can read the list
     try:
         response = notion.pages.create(
             parent={"database_id": DATABASE_ID},
