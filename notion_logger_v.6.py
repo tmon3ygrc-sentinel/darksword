@@ -82,14 +82,14 @@ SELECT_FIELDS = {
 }
 
 MULTI_SELECT_FIELDS = {
-    "detection_opportunities", "attack_tactic", "identity_impact",
+    "detection_opportunities", "attack_tactic",
     "content_type", "cpe_category", "tags", "kill_chain_phase",
-    "impacted_identity_provider", "attack_techniques", "target_sector",
+    "impacted_identity", "attack_techniques", "target_sector",
     "threat_actor", "priority_level", "intel_category", "control_domains",
     "dfir_phase", "investigation_type"
 }
 
-RICH_TEXT_FIELDS = {"key_takeaways", "executive_summary", "operational_relevance", "record_id"}
+RICH_TEXT_FIELDS = {"key_takeaways", "executive_summary", "operational_relevance", "record_id", "identity_impact"}
 DATE_FIELDS      = {"intel_date", "intel_timestamp"}
 NUMBER_FIELDS    = {"risk_severity_score"}
 
@@ -152,11 +152,11 @@ asset_criticality::
 identity_impact::
 intel_type::
 response_urgency::
+impacted_identity::
 detection_opportunities::
 control_domains::
 Master Frameworks(CMMC 2.0 / NIST 800-171)::
 GRC_Learning_Plan_All_Phases::
-impacted_identity_provider::
 tags::
 key_takeaways::
 story_type::
@@ -178,29 +178,30 @@ investigation_type::
 - **cpe_category**: Always "Technical" unless specified.
 - **cpe_credits**: Always "0.5" per record.
 - **content_type**: Always "Podcast/Video".
-- **intel_category**: malware, vulnerability, campaign, advisory, breach, tooling, strategic, threat-actor.
+- **intel_category**: malware, vulnerability, campaign, advisory, breach, tooling, threat-actor, governance, risk-management, identity-intelligence, strategic-intelligence, dfir, compliance. Select closest match(es). Do NOT invent new categories.
 - **kill_chain_phase**: reconnaissance, weaponization, delivery, exploitation, installation, command-and-control, actions-on-objectives.
 - **attack_tactic**: MITRE ATT&CK tactics (lowercase, hyphenated).
 - **attack_techniques**: MITRE ATT&CK technique IDs (UPPERCASE, e.g., T1190, T1059).
 - **intel_type**: tactical, strategic, or operational.
 - **asset_criticality**: tier-zero, high, medium, low.
-- **identity_impact**: federated-identity, privileged-account, service-account, standard-user, none.
-- **response_urgency**: immediate-action, monitor, strategic-review.
+- **identity_impact**: Write 1-2 analyst sentences describing which identity types are impacted and how. Focus on blast radius and authentication context.
+- **response_urgency**: immediate-action, scheduled, monitor, strategic-review.
 - **cisa_kev**: Explicitly "yes", "no", or "unknown".
 - **confidence**: High, Medium, or Low.
 - **priority_level**: Critical, High, Medium, or Low.
-- **exploit_maturity**: poc, functional, weaponized, living-off-the-land, automated, unknown.
+- **exploit_maturity**: poc, functional, weaponized, living-off-the-land, automated, theoretical, unknown.
 - **risk_severity_score**: 0-10.
 - **detection_opportunities**: Specific technical indicators or SOC triggers (comma-separated).
-- **control_domains**: Access-Control, Identity-and-Authentication, Endpoint-Security, Malware-Protection, Logging-and-Monitoring, Incident-Response, Threat-Intelligence, Secure-Configuration-Management, Cloud-Security, API-Security, Data-Protection, Privacy-and-Compliance, Security-Awareness-and-Training, Risk-Management.
+- **control_domains**: Access Control (AC), Identification and Authentication (IA), Endpoint Security, Malware Protection, Logging and Monitoring (AU), Incident Response (IR), Threat Intelligence, Secure Configuration Management (CM), Cloud Security, API Security, Data Protection, Privacy and Compliance, Security Awareness and Training (AT), Risk Assessment (RA), Supply Chain Risk Management (SR), System Integrity (SI). Use full names exactly as shown.
 - **Master Frameworks(CMMC 2.0 / NIST 800-171)**: CMMC 2.0 / NIST 800-171 Control IDs (comma-separated). Use "None" if no clear mapping.
 - **GRC_Learning_Plan_All_Phases**: Map to the most relevant week: "Week ## - [title]". Options: Week 25 - Developing security policies, Week 26 - Building compliance programs, Week 27 - Risk management frameworks. Leave blank if no match.
-- **impacted_identity_provider**: on-prem-ad, entra-id, okta, google-workspace, mfa-provider, none, unknown.
+- **impacted_identity**: Who is impacted (comma-separated). Values: workforce-accounts, administrative-roles, system-administrators, security-operations, service-accounts, non-human-identities, executive-accounts, third-party-vendors, none, unknown.
 - **tags**: ALL MITRE IDs (lowercase) AND descriptive keywords (lowercase-hyphenated).
-- **story_type**: MUST be exactly one of: incident, vulnerability, advisory, strategic.
+- **story_type**: MUST be exactly one of: incident, vulnerability, advisory, strategic, legal-regulatory.
 - **executive_summary**: Exactly 3 sentences.
 - **dfir_phase**: initial-triage, containment, eradication, recovery. Use "None" if not active incident.
 - **investigation_type**: threat-hunt, incident-response, vulnerability-assessment, compliance-review. Use "None" if not applicable.
+- **content_category**: Threat Intelligence, AI Governance / Privacy Law, Technical, Management, DFIR, Compliance, Strategic, Legal-Regulatory. Select closest match. Do NOT invent new categories.
 
 ### INTELLIGENCE ANALYSIS GUIDELINES
 1. Be Intelligence-Driven: Focus on threats, vulnerabilities, and defensive opportunities.
@@ -548,11 +549,14 @@ def parse_records(file_path: Path) -> List[dict]:
         if raw.get('record_id'):
             records.append(raw)
     return records
-
 def push_all(records: list, source_label: str, url: str):
     """Pushes all records and saves any failures for retry."""
     failed = []
-    push_all(records, "Daily Threat Brief", url)
+    for r in records:
+        success = push_record(r, source_label, url)
+        if not success:
+            failed.append(r)
+        time.sleep(0.4)
 
     if failed:
         fail_path = SCRIPT_DIR / "failed_records.txt"
@@ -624,9 +628,8 @@ def main():
             write_governance_file(raw_output)
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
-            for r in records:
-                push_all(records, "Daily Threat Brief", url)
-                time.sleep(0.4)
+            # REPLACE WITH:
+            push_all(records, "Daily Threat Brief", url)
 
     # ── Post-run audit ─────────────────────────────────────────
     if CMMC_MISSES:
