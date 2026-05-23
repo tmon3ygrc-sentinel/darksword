@@ -38,3 +38,4 @@ GRC-Playground/
 arch_update.txt
 governance_input.txt
 .env*.bak
+*.bak
