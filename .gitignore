@@ -37,4 +37,4 @@ GRC-Playground/
 *.csv
 arch_update.txt
 governance_input.txt
-.env
+.env*.bak
