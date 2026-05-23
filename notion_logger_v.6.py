@@ -84,12 +84,12 @@ SELECT_FIELDS = {
 MULTI_SELECT_FIELDS = {
     "detection_opportunities", "attack_tactic",
     "content_type", "cpe_category", "tags", "kill_chain_phase",
-    "impacted_identity", "attack_techniques", "target_sector",
+    "identity_impact", "attack_techniques", "target_sector",
     "threat_actor", "priority_level", "intel_category", "control_domains",
     "dfir_phase", "investigation_type"
 }
 
-RICH_TEXT_FIELDS = {"key_takeaways", "executive_summary", "operational_relevance", "record_id", "identity_impact"}
+RICH_TEXT_FIELDS = {"key_takeaways", "executive_summary", "operational_relevance", "record_id"}
 DATE_FIELDS      = {"intel_date", "intel_timestamp"}
 NUMBER_FIELDS    = {"risk_severity_score"}
 
@@ -152,7 +152,7 @@ asset_criticality::
 identity_impact::
 intel_type::
 response_urgency::
-impacted_identity::
+identity_impact::
 detection_opportunities::
 control_domains::
 Master Frameworks(CMMC 2.0 / NIST 800-171)::
@@ -195,7 +195,7 @@ investigation_type::
 - **control_domains**: Access Control (AC), Identification and Authentication (IA), Endpoint Security, Malware Protection, Logging and Monitoring (AU), Incident Response (IR), Threat Intelligence, Secure Configuration Management (CM), Cloud Security, API Security, Data Protection, Privacy and Compliance, Security Awareness and Training (AT), Risk Assessment (RA), Supply Chain Risk Management (SR), System Integrity (SI). Use full names exactly as shown.
 - **Master Frameworks(CMMC 2.0 / NIST 800-171)**: CMMC 2.0 / NIST 800-171 Control IDs (comma-separated). Use "None" if no clear mapping.
 - **GRC_Learning_Plan_All_Phases**: Map to the most relevant week: "Week ## - [title]". Options: Week 25 - Developing security policies, Week 26 - Building compliance programs, Week 27 - Risk management frameworks. Leave blank if no match.
-- **impacted_identity**: Who is impacted (comma-separated). Values: workforce-accounts, administrative-roles, system-administrators, security-operations, service-accounts, non-human-identities, executive-accounts, third-party-vendors, none, unknown.
+- **identity_impact**: Who is impacted (comma-separated). Values: workforce-accounts, administrative-roles, system-administrators, security-operations, service-accounts, non-human-identities, executive-accounts, third-party-vendors, none, unknown.
 - **tags**: ALL MITRE IDs (lowercase) AND descriptive keywords (lowercase-hyphenated).
 - **story_type**: MUST be exactly one of: incident, vulnerability, advisory, strategic, legal-regulatory.
 - **executive_summary**: Exactly 3 sentences.
