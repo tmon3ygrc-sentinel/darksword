@@ -69,6 +69,7 @@ LEARNING_CACHE = {
 }
 
 CMMC_CACHE: Dict[str, str] = {}
+CMMC_MISSES: List[str] = []
 
 # ===================================================================
 # 3. FIELD MAPPINGS
