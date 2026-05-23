@@ -21,6 +21,7 @@ CHANGELOG v6.0:
 import os
 import re
 import sys
+import time
 import anthropic
 from datetime import date
 from pathlib import Path
@@ -63,9 +64,9 @@ else:
 # 2. CACHES
 # ===================================================================
 LEARNING_CACHE = {
-    "Week 25": "2d655ed740388178af99d35ef1ba8c60",
-    "Week 26": "2d655ed7403881ffb921d8538a552713",
-    "Week 27": "2d655ed74038811b88f7f71eb26aaa36",
+    "Week 25": os.getenv("LEARNING_WEEK_25", ""),
+    "Week 26": os.getenv("LEARNING_WEEK_26", ""),
+    "Week 27": os.getenv("LEARNING_WEEK_27", ""),
 }
 
 CMMC_CACHE: Dict[str, str] = {}
@@ -158,8 +159,8 @@ GRC_Learning_Plan_All_Phases::
 impacted_identity_provider::
 tags::
 key_takeaways::
-operational_relevance::
 story_type::
+operational_relevance::
 executive_summary::
 dfir_phase::
 investigation_type::
@@ -175,7 +176,7 @@ investigation_type::
 - **url**: Direct link to the source/video.
 - **title**: Concise, professional title of the specific threat event.
 - **cpe_category**: Always "Technical" unless specified.
-- **cpe_credits**: Always "0.05" per record.
+- **cpe_credits**: Always "0.5" per record.
 - **content_type**: Always "Podcast/Video".
 - **intel_category**: malware, vulnerability, campaign, advisory, breach, tooling, strategic, threat-actor.
 - **kill_chain_phase**: reconnaissance, weaponization, delivery, exploitation, installation, command-and-control, actions-on-objectives.
@@ -261,10 +262,26 @@ def scrub(text: str) -> str:
       - Brackets like [MITRE T1190], [CVE-2024-1234], [CISA KEV]
       - Any content that could be threat intelligence
     """
-    text = re.sub(r'\b\d+:\d{2}\b', '', text)   # timestamps only
-    text = re.sub(r'\s+', ' ', text).strip()      # normalize whitespace
-    return text
+    text = re.sub(r'===INTEL_RECORD_(?:START|END)===', '', text)  # Injection defense pre-flight 
+    text = re.sub(r'\b\d+:\d{2}\b', '', text)                     # Blade across the sky
+    text = re.sub(r'\s+', ' ', text).strip()                      # Records markers fall silent 
+    return text                                                   # No ghost in the shell
+def normalize_cid(cid: str) -> str:
+    """
+    Canonical form for CMMC / NIST 800-171 control IDs.
+    Uppercases, strips whitespace, collapses internal spaces to hyphens.
 
+    Examples that all resolve to the same key:
+      'SI.L2-3.14.1'  →  'SI.L2-3.14.1'
+      'si.l2-3.14.1'  →  'SI.L2-3.14.1'
+      ' SI.L2-3.14.1' →  'SI.L2-3.14.1'
+      'SI.L2 3.14.1'  →  'SI.L2-3.14.1'
+    """
+    # Remove spaces around hyphens first, then strip remaining whitespace
+    cid = cid.strip().upper()
+    cid = re.sub(r'\s*-\s*', '-', cid)   # "SI.L2 - 3.14.1" → "SI.L2-3.14.1"
+    cid = re.sub(r'\s+', '-', cid)        # any remaining spaces → hyphen
+    return cid
 # ===================================================================
 # 6. PIPELINE FUNCTIONS
 # ===================================================================
@@ -343,11 +360,15 @@ def load_mock_data() -> str:
     record_count = content.count("===INTEL_RECORD_START===")
     print(f"✅ Mock data loaded: {record_count} record(s) from governance_input.txt")
     return content
-
-
+# ===================================================================
+# write_governance_file (Old File bows, becomes .bak New words take the thrown Backup Samaurai)
+# ===================================================================
 def write_governance_file(content: str):
-    """Writes Claude's output to governance_input.txt."""
     output_path = SCRIPT_DIR / "governance_input.txt"
+    backup_path = SCRIPT_DIR / "governance_input.bak"
+    if output_path.exists():
+        output_path.replace(backup_path)
+        print("💾 Previous output backed up to governance_input.bak")
     output_path.write_text(content, encoding="utf-8")
     print("✅ governance_input.txt written")
 
@@ -378,7 +399,7 @@ def load_cmmc_cache():
                 if title_props:
                     cid = title_props[0].get("plain_text", "").strip()
                     if cid:
-                        CMMC_CACHE[cid] = page["id"]
+                        CMMC_CACHE[normalize_cid(cid)] = page["id"]
             has_more = res.get("has_more", False)
             cursor   = res.get("next_cursor")
         print(f"✅ CMMC cache loaded: {len(CMMC_CACHE)} controls")
@@ -389,10 +410,10 @@ def load_cmmc_cache():
 def update_compliance_status(control_ids: List[str], log_page_url: str):
     """Writes back to CMMC database to mark evidence."""
     for cid in control_ids:
-        if cid in CMMC_CACHE:
+        if normalize_cid(cid) in CMMC_CACHE:
             try:
                 notion.pages.update(
-                    page_id=CMMC_CACHE[cid],
+                    page_id=CMMC_CACHE[normalize_cid(cid)],
                     properties={
                         "Status":        {"select": {"name": "Evidence Pending"}},
                         "Last Evidence": {"url": log_page_url}
@@ -431,7 +452,10 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
         elif key in RICH_TEXT_FIELDS:
             props[key] = {"rich_text": to_text(val)}
         elif key in DATE_FIELDS:
-            props[key] = {"date": {"start": str(val).strip()}}
+            val_str = str(val).strip()
+            # Guard: Notion requires a real date, not a bare time string
+            if val_str and not val_str.startswith('T'):
+                props[key] = {"date": {"start": val_str}}
         elif key in NUMBER_FIELDS:
             try:
                 props[key] = {"number": float(val)}
@@ -445,13 +469,22 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
         record.get("cmmc_mapping", "")
     )
     if cmmc_raw and str(cmmc_raw).lower() not in ("none", "unknown"):
-        cids = [x.strip() for x in cmmc_raw.split(",") if x.strip()]
-        rels = [{"id": CMMC_CACHE[cid]} for cid in cids if cid in CMMC_CACHE]
+        cids_raw = [x.strip() for x in cmmc_raw.split(",") if x.strip()]
+        rels  = []
+        missed = []
+        for cid in cids_raw:
+            norm = normalize_cid(cid)
+            if norm in CMMC_CACHE:
+                rels.append({"id": CMMC_CACHE[norm]})
+            else:
+                missed.append(cid)
         if rels:
             props["Master Frameworks(CMMC 2.0 / NIST 800-171)"] = {"relation": rels}
             print(f"    🔗 Linked {len(rels)} CMMC control(s)")
-        else:
-            print(f"    ⚠️  No CMMC cache matches for: {cids}")
+        if missed:
+            print(f"    ⚠️  Unresolved CMMC IDs: {missed}")
+            CMMC_MISSES.extend(f"{record_id}: {m}" for m in missed)
+        
 
     # === Learning Plan Relation ===
     # Accepts both key formats for compatibility
@@ -503,13 +536,35 @@ def parse_records(file_path: Path) -> List[dict]:
     records = []
     for block in blocks:
         raw = {}
+        current_key = None
         for line in block.strip().split('\n'):
             if '::' in line:
                 k, v = line.split('::', 1)
-                raw[k.strip()] = v.strip()
+                current_key = k.strip()
+                raw[current_key] = v.strip()
+            elif current_key and line.strip():
+                # continuation line — append to the current field
+                raw[current_key] += ' ' + line.strip()
         if raw.get('record_id'):
             records.append(raw)
     return records
+
+def push_all(records: list, source_label: str, url: str):
+    """Pushes all records and saves any failures for retry."""
+    failed = []
+    push_all(records, "Daily Threat Brief", url)
+
+    if failed:
+        fail_path = SCRIPT_DIR / "failed_records.txt"
+        with open(fail_path, "a", encoding="utf-8") as f:
+            for r in failed:
+                f.write("===INTEL_RECORD_START===\n")
+                for k, v in r.items():
+                    f.write(f"{k}:: {v}\n")
+                f.write("===INTEL_RECORD_END===\n\n")
+        print(f"⚠️  {len(failed)} record(s) failed — saved to failed_records.txt")
+    else:
+        print(f"✅ All {len(records)} record(s) pushed successfully.")
 
 # ===================================================================
 # 10. MAIN
@@ -555,27 +610,34 @@ def main():
                 continue
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
-            for r in records:
-                push_record(r, "Daily Threat Brief", url)
+            push_all(records, "Daily Threat Brief", url)
 
         elif choice == "2":
             url = input("Source URL: ").strip()
             input("Save AI output to governance_input.txt then press ENTER...")
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
-            for r in records:
-                push_record(r, "Daily Threat Brief", url)
+            push_all(records, "Daily Threat Brief", url)
 
         elif choice == "3" and TEST_MODE:
-            url = input("Source URL (for record metadata): ").strip()
-            try:
-                load_mock_data()
-            except FileNotFoundError as e:
-                print(e)
-                continue
+            url = input("Source URL (for metadata): ").strip()
+            raw_output = load_mock_data()
+            write_governance_file(raw_output)
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
-            print(f"\n📋 [TEST] Pushing {len(records)} record(s) to Notion...")
+            print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
             for r in records:
-                push_record(r, "Daily Threat Brief", url)
+                push_all(records, "Daily Threat Brief", url)
+                time.sleep(0.4)
+
+    # ── Post-run audit ─────────────────────────────────────────
+    if CMMC_MISSES:
+        print(f"\n{'='*60}")
+        print(f"⚠️  CMMC MISS REPORT — {len(CMMC_MISSES)} unresolved ID(s)")
+        print(f"{'='*60}")
+        for entry in CMMC_MISSES:
+            print(f"   ✗ {entry}")
+        print("   Check: Claude output format vs Notion control name spelling.")
+    else:
+        print("\n✅ All CMMC IDs resolved cleanly.")
 
 if __name__ == "__main__":
     main()
