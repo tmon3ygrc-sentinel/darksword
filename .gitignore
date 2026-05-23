@@ -36,3 +36,5 @@ GRC-Playground/
 *.txt
 *.csv
 arch_update.txt
+governance_input.txt
+.env

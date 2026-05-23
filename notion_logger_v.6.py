@@ -1,24 +1,41 @@
 """
-🛡️ STAR CPE LOGGER V6.0 — PROJECT DARKSWORD
+⚔️  DARKSWORD — GRC Intelligence Platform V6.0
 Autonomous Intelligence Pipeline
 YouTube → Transcript → Claude Analysis → Notion
+
+MODES:
+  Live Mode  — Full autonomous pipeline (requires ANTHROPIC_API_KEY)
+  Test Mode  — Bypasses API entirely, uses saved governance_input.txt
+               Run 100 times for $0.00 until pipeline is bulletproof.
+
+CHANGELOG v6.0:
+  + Autonomous YouTube transcript fetching
+  + Claude API analysis pipeline
+  + --test flag for $0.00 debugging
+  + Pagination in CMMC cache (handles >100 controls)
+  + scrub() cleans transcript artifacts without destroying intel
+  + Specific exception handling
+  + Dual-key compatibility (Notion names + short names both work)
 """
 
 import os
 import re
+import sys
 import anthropic
 from datetime import date
 from pathlib import Path
 from typing import List, Dict
 from notion_client import Client
 from dotenv import load_dotenv
-from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
 
 # ===================================================================
-# 1. CONFIGURATION & DIRECTORIES
+# 1. CONFIGURATION & MODE DETECTION
 # ===================================================================
 SCRIPT_DIR = Path(__file__).parent.absolute()
 load_dotenv(dotenv_path=SCRIPT_DIR / ".env")
+
+# Run with: python notion_logger_v.6.py --test
+TEST_MODE = "--test" in sys.argv
 
 NOTION_TOKEN      = os.getenv("NOTION_TOKEN")
 DATABASE_ID       = os.getenv("DATABASE_ID")
@@ -27,15 +44,23 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 if not NOTION_TOKEN or not DATABASE_ID:
     raise ValueError("❌ Missing NOTION_TOKEN or DATABASE_ID in .env")
-if not ANTHROPIC_API_KEY:
-    raise ValueError("❌ Missing ANTHROPIC_API_KEY in .env")
+
+if not TEST_MODE and not ANTHROPIC_API_KEY:
+    raise ValueError(
+        "❌ Missing ANTHROPIC_API_KEY in .env\n"
+        "   💡 Free debug mode: python notion_logger_v.6.py --test"
+    )
 
 notion = Client(auth=NOTION_TOKEN)
-claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-print("✅ Notion + Claude clients initialized")
+claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if not TEST_MODE else None
+
+if TEST_MODE:
+    print("⚠️  TEST MODE ACTIVE — Anthropic API will NOT be called. $0.00 cost.")
+else:
+    print("✅ Notion + Claude clients initialized")
 
 # ===================================================================
-# 2. THE "NICKNAME" CACHE (Manual Entry Required)
+# 2. CACHES
 # ===================================================================
 LEARNING_CACHE = {
     "Week 25": "2d655ed740388178af99d35ef1ba8c60",
@@ -46,7 +71,7 @@ LEARNING_CACHE = {
 CMMC_CACHE: Dict[str, str] = {}
 
 # ===================================================================
-# 3. FIELD MAPPINGS (GRC Standards)
+# 3. FIELD MAPPINGS
 # ===================================================================
 SELECT_FIELDS = {
     "content_category", "exploit_maturity", "source", "story_type",
@@ -62,12 +87,13 @@ MULTI_SELECT_FIELDS = {
     "dfir_phase", "investigation_type"
 }
 
-RICH_TEXT_FIELDS  = {"key_takeaways", "executive_summary", "operational_relevance", "record_id"}
-DATE_FIELDS       = {"intel_date", "intel_timestamp"}
-NUMBER_FIELDS     = {"risk_severity_score"}
+RICH_TEXT_FIELDS = {"key_takeaways", "executive_summary", "operational_relevance", "record_id"}
+DATE_FIELDS      = {"intel_date", "intel_timestamp"}
+NUMBER_FIELDS    = {"risk_severity_score"}
 
 SKIP_FIELDS = {
-    "url", "title", "cpe_credits", "cmmc_mapping", "learning_phase",
+    "url", "title", "cpe_credits",
+    "cmmc_mapping", "learning_phase",
     "GRC_Learning_Plan_All_Phases",
     "Master Frameworks(CMMC 2.0 / NIST 800-171)"
 }
@@ -141,7 +167,7 @@ investigation_type::
 ### FIELD DEFINITIONS (STRICT)
 - **record_id**: source-epNNNN-YYYY-MM-DD-## (e.g., simplycyber-ep1075-2026-02-24-01)
 - **intel_date**: Date of the threat/event (YYYY-MM-DD).
-- **intel_timestamp**: ISO 8601. If time is unknown, DEFAULT TO T14:00:00Z.
+- **intel_timestamp**: ISO 8601. If time unknown, DEFAULT TO T14:00:00Z.
 - **date_watched**: Date content was consumed (YYYY-MM-DD).
 - **source**: Full name of source channel (e.g., Simply Cyber).
 - **source_show**: The specific show or program name (e.g., Simply Cyber Daily Threat Brief).
@@ -162,17 +188,17 @@ investigation_type::
 - **confidence**: High, Medium, or Low.
 - **priority_level**: Critical, High, Medium, or Low.
 - **exploit_maturity**: poc, functional, weaponized, living-off-the-land, automated, unknown.
-- **risk_severity_score**: 0-10. (0-3=low, 4-6=contained, 7-8=enterprise, 9-10=destructive).
+- **risk_severity_score**: 0-10.
 - **detection_opportunities**: Specific technical indicators or SOC triggers (comma-separated).
 - **control_domains**: Access-Control, Identity-and-Authentication, Endpoint-Security, Malware-Protection, Logging-and-Monitoring, Incident-Response, Threat-Intelligence, Secure-Configuration-Management, Cloud-Security, API-Security, Data-Protection, Privacy-and-Compliance, Security-Awareness-and-Training, Risk-Management.
-- **Master Frameworks(CMMC 2.0 / NIST 800-171)**: CMMC 2.0 / NIST 800-171 Control IDs (comma-separated, e.g., AC.L2-3.1.1, IA.L2-3.5.3). Use "None" if no clear mapping.
-- **GRC_Learning_Plan_All_Phases**: Map to the most relevant week using EXACTLY this format: "Week ## – [title]". Options: Week 25 – Developing security policies, Week 26 – Building compliance programs, Week 27 – Risk management frameworks. Leave blank if no clear match.
+- **Master Frameworks(CMMC 2.0 / NIST 800-171)**: CMMC 2.0 / NIST 800-171 Control IDs (comma-separated). Use "None" if no clear mapping.
+- **GRC_Learning_Plan_All_Phases**: Map to the most relevant week: "Week ## - [title]". Options: Week 25 - Developing security policies, Week 26 - Building compliance programs, Week 27 - Risk management frameworks. Leave blank if no match.
 - **impacted_identity_provider**: on-prem-ad, entra-id, okta, google-workspace, mfa-provider, none, unknown.
-- **tags**: ALL MITRE IDs (lowercase, e.g., t1190) AND descriptive keywords (lowercase-hyphenated).
+- **tags**: ALL MITRE IDs (lowercase) AND descriptive keywords (lowercase-hyphenated).
 - **story_type**: MUST be exactly one of: incident, vulnerability, advisory, strategic.
-- **executive_summary**: Exactly 3 sentences. Sentence 1=what happened. Sentence 2=business impact. Sentence 3=what must be done.
-- **dfir_phase**: DFIR phase if applicable (comma-separated): initial-triage, containment, eradication, recovery. Use "None" if not an active incident.
-- **investigation_type**: Type of investigation warranted (comma-separated): threat-hunt, incident-response, vulnerability-assessment, compliance-review. Use "None" if not applicable.
+- **executive_summary**: Exactly 3 sentences.
+- **dfir_phase**: initial-triage, containment, eradication, recovery. Use "None" if not active incident.
+- **investigation_type**: threat-hunt, incident-response, vulnerability-assessment, compliance-review. Use "None" if not applicable.
 
 ### INTELLIGENCE ANALYSIS GUIDELINES
 1. Be Intelligence-Driven: Focus on threats, vulnerabilities, and defensive opportunities.
@@ -190,50 +216,88 @@ A record MUST be created if ANY of the following are present:
 - Mention of vulnerability or active exploitation
 - Mention of threat actor activity or campaign
 - Security advisory tied to a specific technology or control failure
-- Repeated emphasis on a specific risk pattern indicating a trend
 - Credentials, admin accounts, tenant access, or authentication mentioned
 If uncertain, CREATE the record and mark confidence:: Low.
 
 ### EXTRACTION BIAS RULE
-Prefer over-extraction. Missing a story is a failure. Including a low-confidence record is acceptable.
+Prefer over-extraction. Missing a story is a failure.
 
 ### PRE-OUTPUT VALIDATION STEP (MANDATORY)
-Before finalizing output, you MUST:
-1. Enumerate total stories identified from the transcript
+Before finalizing output:
+1. Enumerate total stories identified
 2. Verify one complete record exists per story
-3. Confirm no story meeting the qualification rules was omitted
-4. If mismatch exists — regenerate before output
+3. Confirm no qualifying story was omitted
+4. If mismatch — regenerate before output
 """
 
 # ===================================================================
-# 5. AUTONOMOUS PIPELINE FUNCTIONS
+# 5. UTILITY FUNCTIONS
+#    Taken from Librarian's rewrite — cleaner property builders
+# ===================================================================
+
+def to_text(val: str) -> list:
+    """Builds a Notion rich_text block from a string."""
+    return [{"text": {"content": str(val)[:2000]}}] if val else []
+
+def to_select(val: str) -> dict:
+    """Builds a Notion select block from a string."""
+    return {"name": str(val).strip()} if val else None
+
+def to_multi(val: str) -> list:
+    """Splits a comma-separated string into Notion multi_select blocks."""
+    items = [x.strip() for x in str(val).split(",")]
+    return [{"name": i} for i in items if i]
+
+def scrub(text: str) -> str:
+    """
+    Cleans YouTube auto-caption artifacts from transcript text.
+
+    SAFE removals (caption noise):
+      - Timestamps: "0:00", "12:34"
+      - Excess whitespace
+
+    NOT removed (would destroy intel):
+      - Brackets like [MITRE T1190], [CVE-2024-1234], [CISA KEV]
+      - Any content that could be threat intelligence
+    """
+    text = re.sub(r'\b\d+:\d{2}\b', '', text)   # timestamps only
+    text = re.sub(r'\s+', ' ', text).strip()      # normalize whitespace
+    return text
+
+# ===================================================================
+# 6. PIPELINE FUNCTIONS
 # ===================================================================
 
 def extract_video_id(url: str) -> str:
     """Handles all common YouTube URL formats."""
     patterns = [
-        r"(?:v=)([a-zA-Z0-9_-]{11})",       # ?v=ID
-        r"(?:youtu\.be/)([a-zA-Z0-9_-]{11})", # youtu.be/ID
-        r"(?:live/)([a-zA-Z0-9_-]{11})",      # /live/ID
-        r"(?:embed/)([a-zA-Z0-9_-]{11})",     # /embed/ID
+        r"(?:v=)([a-zA-Z0-9_-]{11})",
+        r"(?:youtu\.be/)([a-zA-Z0-9_-]{11})",
+        r"(?:live/)([a-zA-Z0-9_-]{11})",
+        r"(?:embed/)([a-zA-Z0-9_-]{11})",
     ]
     for pattern in patterns:
         match = re.search(pattern, url)
         if match:
             return match.group(1)
-    raise ValueError(f"❌ Could not extract video ID from URL: {url}")
+    raise ValueError(f"❌ Could not extract video ID from: {url}")
 
 
 def get_transcript(url: str) -> str:
-    """Fetches YouTube transcript and returns as clean text."""
+    """Fetches and cleans YouTube transcript."""
+    from youtube_transcript_api import (
+        YouTubeTranscriptApi,
+        NoTranscriptFound,
+        TranscriptsDisabled
+    )
     print("📡 Fetching YouTube transcript...")
     video_id = extract_video_id(url)
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        text = " ".join([t["text"] for t in transcript])
-        word_count = len(text.split())
-        print(f"✅ Transcript fetched: {word_count:,} words")
-        return text
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=["en"])
+        raw_text = " ".join([t["text"] for t in transcript])
+        clean_text = scrub(raw_text)
+        print(f"✅ Transcript fetched: {len(clean_text.split()):,} words")
+        return clean_text
     except TranscriptsDisabled:
         raise RuntimeError("❌ Transcripts are disabled for this video.")
     except NoTranscriptFound:
@@ -244,116 +308,165 @@ def get_transcript(url: str) -> str:
 
 def analyze_with_claude(transcript: str, url: str, today: str) -> str:
     """Sends transcript to Claude and returns raw intel records text."""
-    print("🤖 Sending to Claude for analysis (this may take 30-60 seconds)...")
-
-    user_message = f"""Today's date is {today}. The source URL is: {url}
-
----TRANSCRIPT---
-{transcript}
-
-[END OF TRANSCRIPT - BEGIN ANALYSIS]"""
-
+    print("🤖 Sending to Claude for analysis (30-60 seconds)...")
     response = claude.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=8000,
         system=ANALYST_PROMPT,
-        messages=[{"role": "user", "content": user_message}]
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Today's date is {today}. Source URL: {url}\n\n"
+                f"---TRANSCRIPT---\n{transcript}\n\n"
+                "[END OF TRANSCRIPT - BEGIN ANALYSIS]"
+            )
+        }]
     )
-
     result = response.content[0].text
-    record_count = result.count("===INTEL_RECORD_START===")
-    print(f"✅ Claude identified {record_count} intel record(s)")
+    print(f"✅ Claude identified {result.count('===INTEL_RECORD_START===')} record(s)")
     return result
+
+
+def load_mock_data() -> str:
+    """
+    TEST MODE: Loads saved governance_input.txt instead of calling Claude.
+    Free. Instant. Safe to run 100 times.
+    """
+    mock_path = SCRIPT_DIR / "governance_input.txt"
+    if not mock_path.exists():
+        raise FileNotFoundError(
+            "❌ No governance_input.txt found for test mode.\n"
+            "   Save a gold-standard Claude output there first, then rerun."
+        )
+    content = mock_path.read_text(encoding="utf-8")
+    record_count = content.count("===INTEL_RECORD_START===")
+    print(f"✅ Mock data loaded: {record_count} record(s) from governance_input.txt")
+    return content
 
 
 def write_governance_file(content: str):
     """Writes Claude's output to governance_input.txt."""
     output_path = SCRIPT_DIR / "governance_input.txt"
     output_path.write_text(content, encoding="utf-8")
-    print(f"✅ governance_input.txt written automatically")
+    print("✅ governance_input.txt written")
 
 # ===================================================================
-# 6. SYSTEM FUNCTIONS (Notion)
+# 7. NOTION FUNCTIONS
 # ===================================================================
 
 def load_cmmc_cache():
-    if not CMMC_DB_ID: return
+    """
+    Loads CMMC Control IDs into memory for instant relation mapping.
+    Uses pagination to handle databases larger than 100 records.
+    Credit: pagination logic from Librarian's rewrite.
+    """
+    if not CMMC_DB_ID:
+        print("⚠️  CMMC_DB_ID not configured — skipping cache")
+        return
     print("📡 Loading CMMC cache...")
     try:
-        res = notion.databases.query(database_id=CMMC_DB_ID)
-        for page in res.get("results", []):
-            title_props = page["properties"].get("Name", {}).get("title", [])
-            if title_props:
-                cid = title_props[0].get("plain_text", "").strip()
-                CMMC_CACHE[cid] = page["id"]
+        has_more = True
+        cursor   = None
+        while has_more:
+            kwargs = {"database_id": CMMC_DB_ID, "page_size": 100}
+            if cursor:
+                kwargs["start_cursor"] = cursor
+            res = notion.databases.query(**kwargs)
+            for page in res.get("results", []):
+                title_props = page["properties"].get("Name", {}).get("title", [])
+                if title_props:
+                    cid = title_props[0].get("plain_text", "").strip()
+                    if cid:
+                        CMMC_CACHE[cid] = page["id"]
+            has_more = res.get("has_more", False)
+            cursor   = res.get("next_cursor")
         print(f"✅ CMMC cache loaded: {len(CMMC_CACHE)} controls")
     except Exception as e:
         print(f"❌ CMMC cache failed: {e}")
 
 
 def update_compliance_status(control_ids: List[str], log_page_url: str):
+    """Writes back to CMMC database to mark evidence."""
     for cid in control_ids:
         if cid in CMMC_CACHE:
             try:
                 notion.pages.update(
                     page_id=CMMC_CACHE[cid],
                     properties={
-                        "Status": {"select": {"name": "Evidence Pending"}},
+                        "Status":        {"select": {"name": "Evidence Pending"}},
                         "Last Evidence": {"url": log_page_url}
                     }
                 )
                 print(f"📡 GRC UPDATE: {cid} → Evidence Pending")
             except Exception as e:
-                print(f"⚠️ GRC update failed for {cid}: {e}")
+                print(f"⚠️  GRC update failed for {cid}: {e}")
 
 # ===================================================================
-# 7. THE ENGINE (PUSH_RECORD)
+# 8. THE ENGINE (PUSH_RECORD)
 # ===================================================================
 
 def push_record(record: dict, source_label: str, url: str) -> bool:
-    record_id = record.get("record_id", "unknown")
+    record_id  = record.get("record_id", "unknown")
     page_title = f"{source_label} - {record_id}"
 
+    # Hardcoded base properties — same every run
     props = {
         "Title":        {"title": [{"text": {"content": page_title}}]},
-        "url":          {"url": url if url else None},
+        "url":          {"url": url} if url else {},
         "date_watched": {"date": {"start": date.today().isoformat()}},
         "cpe_credits":  {"number": 0.5},
     }
 
+    # Route each field to the correct Notion property format
     for key, val in record.items():
-        if key in SKIP_FIELDS or not val or val.lower() in ("none", "unknown", "empty"):
+        if key in SKIP_FIELDS or not val:
+            continue
+        if str(val).lower() in ("none", "unknown", "empty", "n/a"):
             continue
         if key in SELECT_FIELDS:
-            props[key] = {"select": {"name": str(val).strip()}}
+            props[key] = {"select": to_select(val)}
         elif key in MULTI_SELECT_FIELDS:
-            items = [x.strip() for x in str(val).split(",")]
-            props[key] = {"multi_select": [{"name": i} for i in items if i]}
+            props[key] = {"multi_select": to_multi(val)}
         elif key in RICH_TEXT_FIELDS:
-            props[key] = {"rich_text": [{"text": {"content": str(val)[:2000]}}]}
+            props[key] = {"rich_text": to_text(val)}
         elif key in DATE_FIELDS:
             props[key] = {"date": {"start": str(val).strip()}}
         elif key in NUMBER_FIELDS:
-            try: props[key] = {"number": float(val)}
-            except: pass
+            try:
+                props[key] = {"number": float(val)}
+            except (ValueError, TypeError):
+                pass
 
     # === CMMC / Master Frameworks Relation ===
-    cmmc_raw = record.get("Master Frameworks(CMMC 2.0 / NIST 800-171)", "")
-    if cmmc_raw and cmmc_raw.lower() != "none":
+    # Accepts both key formats for compatibility with manual and autonomous flows
+    cmmc_raw = (
+        record.get("Master Frameworks(CMMC 2.0 / NIST 800-171)", "") or
+        record.get("cmmc_mapping", "")
+    )
+    if cmmc_raw and str(cmmc_raw).lower() not in ("none", "unknown"):
         cids = [x.strip() for x in cmmc_raw.split(",") if x.strip()]
-        rels  = [{"id": CMMC_CACHE[cid]} for cid in cids if cid in CMMC_CACHE]
+        rels = [{"id": CMMC_CACHE[cid]} for cid in cids if cid in CMMC_CACHE]
         if rels:
             props["Master Frameworks(CMMC 2.0 / NIST 800-171)"] = {"relation": rels}
+            print(f"    🔗 Linked {len(rels)} CMMC control(s)")
+        else:
+            print(f"    ⚠️  No CMMC cache matches for: {cids}")
 
     # === Learning Plan Relation ===
-    learning_raw = record.get("GRC_Learning_Plan_All_Phases", "")
+    # Accepts both key formats for compatibility
+    learning_raw = (
+        record.get("GRC_Learning_Plan_All_Phases", "") or
+        record.get("learning_phase", "")
+    )
     if learning_raw:
         phase_key = re.split(r'\s[–-]\s', learning_raw)[0].strip()
         if phase_key in LEARNING_CACHE:
-            props["GRC_Learning_Plan_All_Phases"] = {"relation": [{"id": LEARNING_CACHE[phase_key]}]}
-            print(f"    🔗 Linked: {phase_key}")
+            props["GRC_Learning_Plan_All_Phases"] = {
+                "relation": [{"id": LEARNING_CACHE[phase_key]}]
+            }
+            print(f"    🔗 Linked Learning Plan: {phase_key}")
         else:
-            print(f"    ⚠️ No cache match for: '{phase_key}'")
+            print(f"    ⚠️  No cache match for: '{phase_key}'")
 
     try:
         response = notion.pages.create(
@@ -362,7 +475,10 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
         )
         log_url = response.get("url")
         if cmmc_raw and log_url:
-            update_compliance_status([x.strip() for x in cmmc_raw.split(",") if x.strip()], log_url)
+            update_compliance_status(
+                [x.strip() for x in cmmc_raw.split(",") if x.strip()],
+                log_url
+            )
         print(f"✅ Logged: {record_id}")
         return True
     except Exception as e:
@@ -370,13 +486,19 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
         return False
 
 # ===================================================================
-# 8. PARSER
+# 9. PARSER
 # ===================================================================
 
 def parse_records(file_path: Path) -> List[dict]:
-    if not file_path.exists(): return []
+    """Extracts all intel records from a governance_input.txt file."""
+    if not file_path.exists():
+        return []
     content = file_path.read_text(encoding="utf-8")
-    blocks  = re.findall(r'===INTEL_RECORD_START===(.*?)===INTEL_RECORD_END===', content, re.DOTALL)
+    blocks  = re.findall(
+        r'===INTEL_RECORD_START===(.*?)===INTEL_RECORD_END===',
+        content,
+        re.DOTALL
+    )
     records = []
     for block in blocks:
         raw = {}
@@ -389,48 +511,68 @@ def parse_records(file_path: Path) -> List[dict]:
     return records
 
 # ===================================================================
-# 9. MAIN
+# 10. MAIN
 # ===================================================================
 
 def main():
     print("\n" + "="*60)
-    print("🛡️  STAR CPE LOGGER V6.0 — PROJECT DARKSWORD")
-    print("    Autonomous Intelligence Pipeline")
+    print("⚔️   DARKSWORD — GRC Intelligence Platform V6.0")
+    if TEST_MODE:
+        print("     💡 TEST MODE  |  $0.00  |  API Disconnected")
+    else:
+        print("     🔴 LIVE MODE  |  API Connected")
     print("="*60)
 
     load_cmmc_cache()
 
     while True:
-        print("\n1. Daily Threat Brief (Autonomous)")
-        print("2. Daily Threat Brief (Manual — paste your own .txt)")
-        print("3. Exit")
+        print("\n1. Autonomous Pipeline  (YouTube → Claude → Notion)")
+        print("2. Manual Pipeline      (governance_input.txt → Notion)")
+        if TEST_MODE:
+            print("3. Test Pipeline        (Mock data → Notion) ← YOU ARE HERE")
+        print("0. Exit")
+
         choice = input("\nSelection: ").strip()
 
-        if choice == "3":
+        if choice == "0":
             break
 
         elif choice == "1":
-            # ── FULLY AUTONOMOUS PATH ──────────────────────────────
+            if TEST_MODE:
+                print("❌ Autonomous mode disabled in --test. Run without --test flag.")
+                continue
             url = input("YouTube URL: ").strip()
+            if not url:
+                print("❌ URL cannot be empty.")
+                continue
             try:
-                transcript   = get_transcript(url)
-                today        = date.today().isoformat()
-                raw_output   = analyze_with_claude(transcript, url, today)
+                transcript = get_transcript(url)
+                raw_output = analyze_with_claude(transcript, url, date.today().isoformat())
                 write_governance_file(raw_output)
-            except Exception as e:
+            except (RuntimeError, ValueError) as e:
                 print(f"❌ Pipeline failed: {e}")
                 continue
-
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
             for r in records:
                 push_record(r, "Daily Threat Brief", url)
 
         elif choice == "2":
-            # ── MANUAL FALLBACK PATH ───────────────────────────────
             url = input("Source URL: ").strip()
             input("Save AI output to governance_input.txt then press ENTER...")
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
+            for r in records:
+                push_record(r, "Daily Threat Brief", url)
+
+        elif choice == "3" and TEST_MODE:
+            url = input("Source URL (for record metadata): ").strip()
+            try:
+                load_mock_data()
+            except FileNotFoundError as e:
+                print(e)
+                continue
+            records = parse_records(SCRIPT_DIR / "governance_input.txt")
+            print(f"\n📋 [TEST] Pushing {len(records)} record(s) to Notion...")
             for r in records:
                 push_record(r, "Daily Threat Brief", url)
 
