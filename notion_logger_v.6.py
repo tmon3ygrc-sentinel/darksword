@@ -21,6 +21,7 @@ CHANGELOG v6.0:
 import os
 import re
 import sys
+import json
 import time
 import anthropic
 from datetime import date
@@ -303,75 +304,38 @@ def extract_video_id(url: str) -> str:
 
 
 def get_transcript(url: str) -> str:
-    """Fetches and cleans YouTube transcript."""
-    from youtube_transcript_api import (
-        YouTubeTranscriptApi,
-        NoTranscriptFound,
-        TranscriptsDisabled
-    )
-    print("📡 Fetching YouTube transcript...")
+    """Fetches YouTube audio and transcribes using OpenAI Whisper."""
+    import tempfile
+    import whisper
+    import yt_dlp
+
+    print("📡 Downloading audio for transcription...")
     video_id = extract_video_id(url)
-    try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=["en"])
-        raw_text = " ".join([t["text"] for t in transcript])
-        clean_text = scrub(raw_text)
-        print(f"✅ Transcript fetched: {len(clean_text.split()):,} words")
-        return clean_text
-    except TranscriptsDisabled:
-        raise RuntimeError("❌ Transcripts are disabled for this video.")
-    except NoTranscriptFound:
-        raise RuntimeError("❌ No transcript found. Try a video with captions enabled.")
-    except Exception as e:
-        raise RuntimeError(f"❌ Transcript fetch failed: {e}")
 
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = f"{tmpdir}/{video_id}.mp3"
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": audio_path,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "64",
+            }],
+            "quiet": True,
+            "js_runtimes": {"node": {}},
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
-def analyze_with_claude(transcript: str, url: str, today: str) -> str:
-    """Sends transcript to Claude and returns raw intel records text."""
-    print("🤖 Sending to Claude for analysis (30-60 seconds)...")
-    response = claude.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=8000,
-        system=ANALYST_PROMPT,
-        messages=[{
-            "role": "user",
-            "content": (
-                f"Today's date is {today}. Source URL: {url}\n\n"
-                f"---TRANSCRIPT---\n{transcript}\n\n"
-                "[END OF TRANSCRIPT - BEGIN ANALYSIS]"
-            )
-        }]
-    )
-    result = response.content[0].text
-    print(f"✅ Claude identified {result.count('===INTEL_RECORD_START===')} record(s)")
-    return result
+        print("🎙️ Transcribing with Whisper (this may take 1-2 minutes)...")
+        model = whisper.load_model("base")
+        result = model.transcribe(audio_path + ".mp3")
+        raw_text = result["text"]
 
-
-def load_mock_data() -> str:
-    """
-    TEST MODE: Loads saved governance_input.txt instead of calling Claude.
-    Free. Instant. Safe to run 100 times.
-    """
-    mock_path = SCRIPT_DIR / "governance_input.txt"
-    if not mock_path.exists():
-        raise FileNotFoundError(
-            "❌ No governance_input.txt found for test mode.\n"
-            "   Save a gold-standard Claude output there first, then rerun."
-        )
-    content = mock_path.read_text(encoding="utf-8")
-    record_count = content.count("===INTEL_RECORD_START===")
-    print(f"✅ Mock data loaded: {record_count} record(s) from governance_input.txt")
-    return content
-# ===================================================================
-# write_governance_file (Old File bows, becomes .bak New words take the thrown Backup Samaurai)
-# ===================================================================
-def write_governance_file(content: str):
-    output_path = SCRIPT_DIR / "governance_input.txt"
-    backup_path = SCRIPT_DIR / "governance_input.bak"
-    if output_path.exists():
-        output_path.replace(backup_path)
-        print("💾 Previous output backed up to governance_input.bak")
-    output_path.write_text(content, encoding="utf-8")
-    print("✅ governance_input.txt written")
+    clean_text = scrub(raw_text)
+    print(f"✅ Transcript ready: {len(clean_text.split()):,} words")
+    return clean_text
 
 # ===================================================================
 # 7. NOTION FUNCTIONS

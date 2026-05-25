@@ -39,3 +39,5 @@ arch_update.txt
 governance_input.txt
 .env*.bak
 *.bak
+client_secrets.json
+token.pickle
