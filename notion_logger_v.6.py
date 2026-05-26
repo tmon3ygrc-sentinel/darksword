@@ -65,9 +65,64 @@ else:
 # 2. CACHES
 # ===================================================================
 LEARNING_CACHE = {
+    "Week 1":  os.getenv("LEARNING_WEEK_1",  ""),
+    "Week 2":  os.getenv("LEARNING_WEEK_2",  ""),
+    "Week 3":  os.getenv("LEARNING_WEEK_3",  ""),
+    "Week 5":  os.getenv("LEARNING_WEEK_5",  ""),
+    "Week 6":  os.getenv("LEARNING_WEEK_6",  ""),
+    "Week 7":  os.getenv("LEARNING_WEEK_7",  ""),
+    "Week 8":  os.getenv("LEARNING_WEEK_8",  ""),
+    "Week 10": os.getenv("LEARNING_WEEK_10", ""),
+    "Week 11": os.getenv("LEARNING_WEEK_11", ""),
+    "Week 12": os.getenv("LEARNING_WEEK_12", ""),
+    "Week 13": os.getenv("LEARNING_WEEK_13", ""),
+    "Week 14": os.getenv("LEARNING_WEEK_14", ""),
+    "Week 15": os.getenv("LEARNING_WEEK_15", ""),
+    "Week 17": os.getenv("LEARNING_WEEK_17", ""),
+    "Week 18": os.getenv("LEARNING_WEEK_18", ""),
+    "Week 19": os.getenv("LEARNING_WEEK_19", ""),
+    "Week 20": os.getenv("LEARNING_WEEK_20", ""),
+    "Week 21": os.getenv("LEARNING_WEEK_21", ""),
+    "Week 23": os.getenv("LEARNING_WEEK_23", ""),
+    "Week 24": os.getenv("LEARNING_WEEK_24", ""),
     "Week 25": os.getenv("LEARNING_WEEK_25", ""),
     "Week 26": os.getenv("LEARNING_WEEK_26", ""),
     "Week 27": os.getenv("LEARNING_WEEK_27", ""),
+    "Week 28": os.getenv("LEARNING_WEEK_28", ""),
+    "Week 29": os.getenv("LEARNING_WEEK_29", ""),
+    "Week 30": os.getenv("LEARNING_WEEK_30", ""),
+    "Week 33": os.getenv("LEARNING_WEEK_33", ""),
+    "Week 35": os.getenv("LEARNING_WEEK_35", ""),
+    "Week 36": os.getenv("LEARNING_WEEK_36", ""),
+}
+
+DOMAIN_TO_WEEKS = {
+    "Incident Response (IR)":                    ["Week 23"],
+    "Supply Chain Risk Management (SR)":         ["Week 19", "Week 29"],
+    "Risk Assessment (RA)":                      ["Week 18", "Week 20"],
+    "Access Control (AC)":                       ["Week 13"],
+    "Identification and Authentication (IA)":    ["Week 13"],
+    "Configuration Management (CM)":             ["Week 12"],
+    "System Integrity (SI)":                     ["Week 17"],
+    "System and Communications Protection (SC)": ["Week 17"],
+    "Security Awareness and Training (AT)":      ["Week 5"],
+    "Audit and Accountability (AU)":             ["Week 27", "Week 28"],
+}
+
+CATEGORY_TO_WEEKS = {
+    "regulatory":            ["Week 25"],
+    "advisory":              ["Week 26"],
+    "supply-chain":          ["Week 19", "Week 29"],
+    "incident":              ["Week 23"],
+    "ransomware":            ["Week 23"],
+    "campaign":              ["Week 18"],
+    "vulnerability":         ["Week 20", "Week 21"],
+    "malware":               ["Week 19"],
+    "breach":                ["Week 28"],
+    "law-enforcement":       ["Week 25"],
+    "ai-risk":               ["Week 17"],
+    "phishing":              ["Week 23"],
+    "identity-intelligence":  ["Week 13"],
 }
 
 CMMC_CACHE: Dict[str, str] = {}
@@ -452,8 +507,10 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
             CMMC_MISSES.extend(f"{record_id}: {m}" for m in missed)
         
 
-    # === Learning Plan Relation ===
-    # Accepts both key formats for compatibility
+    # === Learning Plan Relation (Auto-detect from content) ===
+    linked_weeks = set()
+
+    # 1. Explicit override from record
     learning_raw = (
         record.get("GRC_Learning_Plan_All_Phases", "") or
         record.get("learning_phase", "")
@@ -461,12 +518,30 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
     if learning_raw:
         phase_key = re.split(r'\s[–-]\s', learning_raw)[0].strip()
         if phase_key in LEARNING_CACHE:
-            props["GRC_Learning_Plan_All_Phases"] = {
-                "relation": [{"id": LEARNING_CACHE[phase_key]}]
-            }
-            print(f"    🔗 Linked Learning Plan: {phase_key}")
-        else:
-            print(f"    ⚠️  No cache match for: '{phase_key}'")
+            linked_weeks.add(phase_key)
+
+    # 2. Auto-map from control_domains
+    domains_raw = record.get("control_domains", "") or ""
+    for domain in [d.strip() for d in domains_raw.split(",")]:
+        for week in DOMAIN_TO_WEEKS.get(domain, []):
+            linked_weeks.add(week)
+
+    # 3. Auto-map from intel_category
+    cats_raw = record.get("intel_category", "") or ""
+    for cat in [c.strip() for c in cats_raw.split(",")]:
+        for week in CATEGORY_TO_WEEKS.get(cat, []):
+            linked_weeks.add(week)
+
+    # Push all matched weeks as relations
+    if linked_weeks:
+        relation_ids = [
+            {"id": LEARNING_CACHE[w]}
+            for w in sorted(linked_weeks)
+            if w in LEARNING_CACHE and LEARNING_CACHE[w]
+        ]
+        if relation_ids:
+            props["GRC_Learning_Plan_All_Phases"] = {"relation": relation_ids}
+            print(f"    🔗 Linked Learning Plan: {', '.join(sorted(linked_weeks))}")
 
     try:
         response = notion.pages.create(
