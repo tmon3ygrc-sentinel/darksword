@@ -536,34 +536,45 @@ def get_transcript(url: str) -> str:
 # 7. NOTION FUNCTIONS
 # ===================================================================
 
-def load_cmmc_cache():
+def load_cmmc_cache(retries: int = 3, delay: int = 15):
     """
     Loads CMMC Control IDs into memory for instant relation mapping.
-    Uses pagination to handle databases larger than 100 records.
+    Retries up to 3 times on rate limit before giving up.
     """
     if not CMMC_DB_ID:
         print("⚠️  CMMC_DB_ID not configured — skipping cache")
         return
-    print("📡 Loading CMMC cache...")
-    try:
-        has_more = True
-        cursor   = None
-        while has_more:
-            kwargs = {"database_id": CMMC_DB_ID, "page_size": 100}
-            if cursor:
-                kwargs["start_cursor"] = cursor
-            res = notion.databases.query(**kwargs)
-            for page in res.get("results", []):
-                title_props = page["properties"].get("Name", {}).get("title", [])
-                if title_props:
-                    cid = title_props[0].get("plain_text", "").strip()
-                    if cid:
-                        CMMC_CACHE[normalize_cid(cid)] = page["id"]
-            has_more = res.get("has_more", False)
-            cursor   = res.get("next_cursor")
-        print(f"✅ CMMC cache loaded: {len(CMMC_CACHE)} controls")
-    except Exception as e:
-        print(f"❌ CMMC cache failed: {e}")
+    
+    for attempt in range(1, retries + 1):
+        print(f"📡 Loading CMMC cache (attempt {attempt}/{retries})...")
+        try:
+            has_more = True
+            cursor   = None
+            while has_more:
+                kwargs = {"database_id": CMMC_DB_ID, "page_size": 100}
+                if cursor:
+                    kwargs["start_cursor"] = cursor
+                res = notion.databases.query(**kwargs)
+                for page in res.get("results", []):
+                    title_props = page["properties"].get("Name", {}).get("title", [])
+                    if title_props:
+                        cid = title_props[0].get("plain_text", "").strip()
+                        if cid:
+                            CMMC_CACHE[normalize_cid(cid)] = page["id"]
+                has_more = res.get("has_more", False)
+                cursor   = res.get("next_cursor")
+            print(f"✅ CMMC cache loaded: {len(CMMC_CACHE)} controls")
+            return  # Success — exit the retry loop
+        except Exception as e:
+            if "rate limited" in str(e).lower():
+                if attempt < retries:
+                    print(f"⏳ Rate limited — waiting {delay}s before retry...")
+                    time.sleep(delay)
+                else:
+                    print(f"❌ CMMC cache failed after {retries} attempts: {e}")
+            else:
+                print(f"❌ CMMC cache failed: {e}")
+                return  # Non-rate-limit error — don't retry
 
 
 def update_compliance_status(control_ids: List[str], log_page_url: str):
