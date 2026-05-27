@@ -259,7 +259,7 @@ investigation_type::
 - **risk_severity_score**: 0-10.
 - **detection_opportunities**: Specific technical indicators or SOC triggers (comma-separated).
 - **control_domains**: Access Control (AC), Identification and Authentication (IA), Endpoint Security, Malware Protection, Logging and Monitoring (AU), Incident Response (IR), Threat Intelligence, Secure Configuration Management (CM), Cloud Security, API Security, Data Protection, Privacy and Compliance, Security Awareness and Training (AT), Risk Assessment (RA), Supply Chain Risk Management (SR), System Integrity (SI). Use full names exactly as shown.
-- **Master Frameworks(CMMC 2.0 / NIST 800-171)**: CMMC 2.0 / NIST 800-171 Control IDs (comma-separated). Use "None" if no clear mapping.
+- **Master Frameworks(CMMC 2.0 / NIST 800-171)**: CMMC 2.0 Control IDs in exact format XX.L#-#.##.# (e.g., AC.L1-3.1.1, SI.L2-3.14.1, IR.L2-3.6.1). Comma-separated. Use "None" if no clear mapping.
 - **GRC_Learning_Plan_All_Phases**: Map to the most relevant week: "Week ## - [title]". Options: Week 25 - Developing security policies, Week 26 - Building compliance programs, Week 27 - Risk management frameworks. Leave blank if no match.
 - **identity_impact**: Who is impacted (comma-separated). Values: workforce-accounts, administrative-roles, system-administrators, security-operations, service-accounts, non-human-identities, executive-accounts, third-party-vendors, none, unknown.
 - **tags**: ALL MITRE IDs (lowercase) AND descriptive keywords (lowercase-hyphenated).
@@ -443,7 +443,7 @@ def analyze_with_claude(content: str, url: str, today: str) -> str:
 
     message = claude.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=8000,
+        max_tokens=16000,
         system=ANALYST_PROMPT,
         messages=[
             {"role": "user", "content": user_message}
@@ -458,6 +458,11 @@ def analyze_with_claude(content: str, url: str, today: str) -> str:
 
 def write_governance_file(content: str):
     """Writes Claude output to governance_input.txt for parsing."""
+    starts = content.count("===INTEL_RECORD_START===")
+    ends   = content.count("===INTEL_RECORD_END===")
+    if starts != ends:
+        print(f"⚠️  Marker mismatch — {starts} START vs {ends} END markers.")
+        print(f"   Last record may be truncated. Consider increasing max_tokens.")
     out_path = SCRIPT_DIR / "governance_input.txt"
     out_path.write_text(content, encoding="utf-8")
     print(f"✅ Governance file written → {out_path.name}")
