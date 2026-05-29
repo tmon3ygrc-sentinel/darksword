@@ -177,6 +177,8 @@ You MUST populate ALL fields. Use "Unknown" or "None" if data is unavailable.
 DO NOT use markdown formatting in the output.
 DO NOT use bullet points in field values.
 DO NOT omit any fields.
+Only use control IDs that exist in CMMC 2.0 / NIST 800-171 Rev 2. 
+Do NOT invent or approximate control IDs. If unsure, use "None".
 
 ### OUTPUT FORMAT RULES
 - Format: fieldname:: value
