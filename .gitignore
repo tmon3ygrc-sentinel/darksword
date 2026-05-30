@@ -32,6 +32,9 @@ Thumbs.db
 GovSCH/
 GRC-Playground/
 
+# Claude Code local settings
+.claude/
+
 # Ignore local data files
 *.txt
 *.csv
