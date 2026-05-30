@@ -8,16 +8,23 @@ $LogFile   = Join-Path $ScriptDir "darksword_$(Get-Date -Format 'yyyy-MM-dd').lo
 
 function Write-Log ($msg) {
     $line = "[$(Get-Date -Format 'HH:mm:ss')] $msg"
-    $line | Out-File -FilePath $LogFile -Append -Encoding utf8
+    $line | Out-File -FilePath $LogFile -Append -Encoding utf8NoBOM
     Write-Host $line
 }
 
 Write-Log "=== DARKSWORD auto-run starting ==="
 Set-Location $ScriptDir
 
-$env:PYTHONIOENCODING = "utf-8"
+# Align PowerShell's pipe-read encoding with Python's UTF-8 output.
+# $OutputEncoding controls how PS decodes external process stdout/stderr;
+# without it PS uses the system codepage and garbles emoji before Out-File
+# ever sees the bytes.
+$env:PYTHONIOENCODING          = "utf-8"
+$OutputEncoding                = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding      = [System.Text.Encoding]::UTF8
+
 & $Python "notion_logger_v7.py" --auto *>&1 | ForEach-Object {
-    $_ | Out-File -FilePath $LogFile -Append -Encoding utf8
+    $_ | Out-File -FilePath $LogFile -Append -Encoding utf8NoBOM
     Write-Host $_
 }
 
