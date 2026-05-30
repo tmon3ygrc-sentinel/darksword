@@ -501,6 +501,77 @@ def extract_video_id(url: str) -> str:
             return match.group(1)
     raise ValueError(f"❌ Could not extract video ID from: {url}")
 
+def get_otx_pulses(api_key: str, lookback_hours: int = 24) -> list:
+    """
+    Fetches relevant threat intelligence pulses from AlienVault OTX.
+    
+    Three-gate filter before Claude sees anything:
+      Gate 1 — Time: only pulses from last lookback_hours
+      Gate 2 — Relevance: only pulses matching DARKSWORD focus tags
+      Gate 3 — Deduplication: no repeat pulse IDs
+    
+    Returns:
+        List of dicts with keys: name, description, url, tags, indicators
+    """
+    from OTXv2 import OTXv2
+    from datetime import datetime, timedelta
+
+    RELEVANT_TAGS = {
+        'ransomware', 'apt', 'nation-state',
+        'critical-infrastructure', 'cisa',
+        'supply-chain', 'phishing', 'identity',
+        'malware', 'vulnerability', 'exploit',
+        'lateral-movement', 'credential-access'
+    }
+
+    print(f"📡 Fetching OTX pulses (last {lookback_hours}hrs)...")
+
+    # Gate 1 — Time filter
+    since = (datetime.utcnow() - timedelta(hours=lookback_hours)).strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        otx    = OTXv2(api_key)
+        pulses = otx.getall(modified_since=since)
+    except Exception as e:
+        raise RuntimeError(f"❌ OTX fetch failed: {e}")
+
+    print(f"   Raw pulses last {lookback_hours}hrs: {len(pulses)}")
+
+    # Gate 2 — Relevance filter
+    def is_relevant(pulse):
+        pulse_tags = {t.lower() for t in pulse.get('tags', [])}
+        return bool(pulse_tags & RELEVANT_TAGS)
+
+    relevant = [p for p in pulses if is_relevant(p)]
+    print(f"   After relevance filter: {len(relevant)}")
+
+    # Gate 3 — Deduplication
+    seen_ids = set()
+    unique   = []
+    for p in relevant:
+        if p['id'] not in seen_ids:
+            seen_ids.add(p['id'])
+            unique.append(p)
+
+    print(f"   After deduplication: {len(unique)} pulse(s) queued for Claude")
+
+    # Format for analyze_with_claude()
+    results = []
+    for p in unique:
+        content = (
+            f"Pulse: {p.get('name', 'Unknown')}\n"
+            f"Description: {p.get('description', 'None')}\n"
+            f"Tags: {', '.join(p.get('tags', []))}\n"
+            f"Indicators: {len(p.get('indicators', []))} IOCs\n"
+            f"Author: {p.get('author_name', 'Unknown')}\n"
+            f"Created: {p.get('created', 'Unknown')}\n"
+        )
+        results.append({
+            "content": content,
+            "url":     f"https://otx.alienvault.com/pulse/{p['id']}",
+            "name":    p.get('name', 'OTX Pulse'),
+        })
+
+    return results
 
 def get_transcript(url: str) -> str:
     """
@@ -781,6 +852,7 @@ def main():
         print("2. Manual Pipeline      (governance_input.txt → Notion)")
         if TEST_MODE:
             print("3. Test Pipeline        (Mock data → Notion) ← YOU ARE HERE")
+        print("4. OTX Pipeline         (AlienVault → Claude → Notion)")
         print("0. Exit")
 
         choice = input("\nSelection: ").strip()
@@ -821,6 +893,35 @@ def main():
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
             push_all(records, "Daily Threat Brief", url)
+        elif choice == "4":
+            if TEST_MODE:
+                print("❌ OTX mode disabled in --test.")
+                continue
+            otx_key = os.getenv("OTX_API_KEY")
+            if not otx_key:
+                print("❌ OTX_API_KEY not set in .env")
+                continue
+            try:
+                pulses = get_otx_pulses(otx_key)
+            except RuntimeError as e:
+                print(e)
+                continue
+            if not pulses:
+                print("✅ No relevant pulses found in last 24hrs.")
+                continue
+            print(f"\n📋 Sending {len(pulses)} pulse(s) to Claude...")
+            all_records = []
+            for pulse in pulses:
+                raw = analyze_with_claude(
+                    pulse["content"],
+                    pulse["url"],
+                    date.today().isoformat()
+                )
+                write_governance_file(raw)
+                records = parse_records(SCRIPT_DIR / "governance_input.txt")
+                all_records.extend(records)
+            print(f"\n📋 Pushing {len(all_records)} record(s) to Notion...")
+            push_all(all_records, "AlienVault OTX", "https://otx.alienvault.com")
 
     # ── Post-run audit ──────────────────────────────────────────
     if CMMC_MISSES:
