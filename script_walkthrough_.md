@@ -1,8 +1,8 @@
 # ⚔️ DARKSWORD — Script Walkthrough
-**notion_logger_v.6.py — Complete Reference**
+**notion_logger_v7.py — Complete Reference**
 
 > This document explains every section of the DARKSWORD pipeline so you own the code, not just run it.
-> Last updated: V6.1 — Post-Backlog Session (Auto Learning Plan Mapping + Field Validation)
+> Last updated: V7.0 — OTX Pipeline, Show Notes Autonomous Mode, Per-Source Prompt Tuning
 
 ---
 
@@ -23,6 +23,7 @@
 13. [Valid Field Values Reference](#13-valid-field-values-reference)
 14. [Key Concepts Reference](#14-key-concepts-reference)
 15. [Change Log — V6.0 → V6.1](#15-change-log--v60--v61)
+16. [Change Log — V6.1 → V7.0](#16-change-log--v61--v70)
 
 ---
 
@@ -294,7 +295,28 @@ This is what makes Claude output perfectly structured `fieldname:: value` record
 **Key prompt rules:**
 - `identity_impact` and `impacted_identity_provider` must use **short comma-separated tags** from the Notion dropdown, not sentences
 - `GRC_Learning_Plan_All_Phases` can now be left blank — the script auto-detects it
-- `threat_actor` set to `unknown` will show as empty in Notion (skipped by the skip filter on line 412)
+- `threat_actor` set to `unknown` will show as empty in Notion (skipped by the skip filter)
+
+---
+
+### OTX_ANALYST_PROMPT *(new in V7.0)*
+
+```python
+OTX_ANALYST_PROMPT = (
+    ANALYST_PROMPT
+    .replace(...)
+)
+```
+
+A modified copy of `ANALYST_PROMPT` built via chained `.replace()` calls — not a separate string. Used exclusively by the OTX Pipeline (Choice 4). Five targeted changes from the base prompt:
+
+1. **Schema pre-fill** — `content_type:: Threat Intelligence Feed` is hard-coded in the schema template so Claude never defaults to "Podcast/Video".
+2. **`content_category` added to schema** — `content_category` was absent from the schema in the base prompt (only in field definitions). Added immediately after `content_type` with default "Threat Intelligence".
+3. **`impacted_identity_provider` added to schema** — also absent from the base schema. Added before `===INTEL_RECORD_END===`. Field definition injected before `investigation_type`.
+4. **Field def: content_type** — `Do NOT use "Podcast/Video"` added explicitly.
+5. **Field def: content_category** — strengthened with "Do NOT leave blank".
+
+> **Why this matters:** The base prompt's `.replace()` for `impacted_identity_provider` in V6 targeted a string that didn't exist in `ANALYST_PROMPT` — it was a silent no-op. The V7 fix patches the schema itself, which is where Claude looks first.
 
 ---
 
@@ -349,18 +371,47 @@ Handles four YouTube URL formats with a list of regex patterns. Tries each one i
 ---
 
 ```python
-def get_transcript(url: str) -> str:
+def get_show_notes(target_date: str = None) -> tuple:
 ```
-Fetches the YouTube transcript using `YouTubeTranscriptApi`, then passes it through `scrub()`. Catches three specific exceptions: `TranscriptsDisabled`, `NoTranscriptFound`, and a catch-all for network errors. Each raises a `RuntimeError` with a clear message instead of a raw API traceback.
+**V7 replacement for `get_transcript()` for Simply Cyber.** Fetches structured show notes from `cyberthreatbrief.simplycyber.io` — no YouTube API, no yt-dlp, no Whisper, no FFmpeg.
 
-> **Known limitation:** Some channels (including Simply Cyber) block automated transcript access at the network/IP level. yt-dlp and cookie-based workarounds were attempted and confirmed blocked. The Manual Pipeline exists specifically for this reason.
+Two-step process:
+1. Hits the episodes listing page and finds the URL for the target date by matching `YYYY-MM-DD` in the href.
+2. Fetches that episode page, strips nav/footer/script noise, runs `scrub()`, returns `(clean_text, canonical_url)`.
+
+`target_date` defaults to today but accepts any `YYYY-MM-DD` string — use this to backfill missed days:
+```python
+get_show_notes("2026-05-20")
+```
+
+Raises `RuntimeError` with a human-readable message if the episode isn't published yet (early AM runs may need to wait ~30 min after drop).
 
 ---
 
 ```python
-def analyze_with_claude(transcript: str, url: str, today: str) -> str:
+def get_transcript(url: str) -> str:
 ```
-Sends the cleaned transcript to Claude with the `ANALYST_PROMPT` as the system message. `max_tokens=8000` gives Claude enough room to generate multiple full intel records. Returns the raw text output.
+Downloads YouTube audio via yt-dlp and transcribes with OpenAI Whisper. Retained for non-blocked sources (Barricade, Cybernews).
+
+> **Blocked for Simply Cyber** — yt-dlp is blocked at the network/IP level for Simply Cyber content. Use `get_show_notes()` for all Simply Cyber content. This function is still called by the V7 manual pipeline if you paste a non-Simply-Cyber URL into Choice 1 via a direct code path (not typical usage).
+
+---
+
+```python
+def analyze_with_claude(content: str, url: str, today: str) -> str:
+```
+Sends cleaned content to Claude using `ANALYST_PROMPT` as the system message. `max_tokens=16000` (doubled from V6's 8000) gives Claude enough headroom for dense episodes with 8–10 stories. Returns raw Claude output string.
+
+After the call, prints the record count: `✅ Claude analysis complete — N record(s) extracted`. If this shows 0, the content likely didn't trigger the story identification rules — check the raw input.
+
+---
+
+```python
+def analyze_with_claude_prompt(content: str, url: str, today: str, prompt: str) -> str:
+```
+**V7 addition.** Identical to `analyze_with_claude()` but accepts a custom system prompt as the fourth argument. Used by the OTX pipeline to pass `OTX_ANALYST_PROMPT` instead of `ANALYST_PROMPT`.
+
+This is the hook for per-source prompt tuning — any future source that needs different extraction logic gets its own prompt constant and calls this function instead of `analyze_with_claude()`.
 
 ---
 
@@ -376,16 +427,48 @@ def write_governance_file(content: str):
 ```
 Writes Claude's output to `governance_input.txt`. This is the handoff point between the Claude pipeline and the Notion push pipeline.
 
+**V7 addition — marker mismatch warning:** Before writing, counts `===INTEL_RECORD_START===` and `===INTEL_RECORD_END===` markers. If counts don't match, prints a warning:
+```
+⚠️  Marker mismatch — N START vs M END markers.
+    Last record may be truncated. Consider increasing max_tokens.
+```
+A mismatch means Claude ran out of tokens mid-record. The fix is to increase `max_tokens` or reduce the input size. The file is still written — partial records will be skipped by the parser since they have no closing marker.
+
+---
+
+```python
+def get_otx_pulses(api_key: str, lookback_hours: int = 24) -> list:
+```
+**V7 addition.** Fetches AlienVault OTX threat intelligence pulses and runs them through a three-gate filter before anything reaches Claude:
+
+**Gate 1 — Time filter:** Only pulses modified in the last `lookback_hours` (default 24). Uses OTX's `modified_since` parameter — server-side filtering, not local.
+
+**Gate 2 — Relevance filter:** Checks pulse tags against a hardcoded set of DARKSWORD-relevant keywords:
+```python
+RELEVANT_TAGS = {
+    'ransomware', 'apt', 'nation-state', 'critical-infrastructure',
+    'cisa', 'supply-chain', 'phishing', 'identity', 'malware',
+    'vulnerability', 'exploit', 'lateral-movement', 'credential-access'
+}
+```
+A pulse passes if any of its tags intersect this set. Pulses with no matching tags are dropped.
+
+**Gate 3 — Deduplication:** Tracks pulse IDs seen in this run. Duplicate IDs (shouldn't happen with a clean API response, but defensive) are dropped.
+
+Returns a list of dicts with `content`, `url`, and `name` — formatted for direct input to `analyze_with_claude_prompt()`. Prints counts at each gate so you can see the funnel: raw → relevant → deduplicated.
+
 ---
 
 ## 8. Notion Functions
 
 ```python
-def load_cmmc_cache():
+def load_cmmc_cache(retries: int = 3, delay: int = 15):
 ```
 Queries your CMMC Notion database and builds `CMMC_CACHE` in memory. Currently loads **128 controls**.
 
 **Pagination:** Notion returns max 100 results per query. The `while has_more` loop keeps fetching pages until it has all of them.
+
+**V7 addition — retry loop:** Wraps the entire fetch in a `for attempt in range(1, retries + 1)` loop. If Notion returns a rate-limit error, the function waits `delay` seconds (default 15) and retries. Non-rate-limit errors fail immediately. After `retries` attempts with no success, it prints a failure message and returns — the script continues without the cache (CMMC relations will be skipped for that session).
 
 ```python
 while has_more:
@@ -591,7 +674,27 @@ except (RuntimeError, ValueError) as e:
     print(f"❌ Pipeline failed: {e}")
     continue
 ```
-Only catches `RuntimeError` (from `get_transcript()`) and `ValueError` (from `extract_video_id()`). Fails gracefully and returns to the menu.
+Only catches `RuntimeError` (from `get_show_notes()` / `get_transcript()`) and `ValueError` (from `extract_video_id()`). Fails gracefully and returns to the menu.
+
+---
+
+```python
+elif choice == "4":
+```
+**V7 addition — OTX Pipeline.** Reads `OTX_API_KEY` from `.env`, calls `get_otx_pulses()` to fetch and filter, then loops through each pulse:
+
+```python
+for pulse in pulses:
+    raw = analyze_with_claude_prompt(
+        pulse["content"], pulse["url"],
+        date.today().isoformat(), OTX_ANALYST_PROMPT
+    )
+    write_governance_file(raw)
+    records = parse_records(SCRIPT_DIR / "governance_input.txt")
+    all_records.extend(records)
+```
+
+One Claude call per pulse (not batched) — keeps individual records clean and avoids Claude conflating content from different pulses. Each pulse overwrites `governance_input.txt` during its loop iteration; `all_records` accumulates across all pulses. After the loop, `push_all()` is called once with the full batch.
 
 ---
 
@@ -599,40 +702,52 @@ Only catches `RuntimeError` (from `get_transcript()`) and `ValueError` (from `ex
 
 ```bash
 # Free — debug all day, $0.00
-python notion_logger_v.6.py --test
+python notion_logger_v7.py --test
 
 # Live — full pipeline
-python notion_logger_v.6.py
+python notion_logger_v7.py
 ```
 
 ### Test Mode menu
 ```
-⚔️   DARKSWORD — GRC Intelligence Platform V6.0
+⚔️   DARKSWORD — GRC Intelligence Platform V7.0
      💡 TEST MODE  |  $0.00  |  API Disconnected
 
 1. Autonomous Pipeline  ← disabled
 2. Manual Pipeline
-3. Test Pipeline
+3. Test Pipeline        ← YOU ARE HERE
 0. Exit
 ```
 
 ### Live Mode menu
 ```
-⚔️   DARKSWORD — GRC Intelligence Platform V6.0
+⚔️   DARKSWORD — GRC Intelligence Platform V7.0
      🔴 LIVE MODE  |  API Connected
 
-1. Autonomous Pipeline  (YouTube → Claude → Notion)
+1. Autonomous Pipeline  (Show Notes → Claude → Notion)
 2. Manual Pipeline      (governance_input.txt → Notion)
+4. OTX Pipeline         (AlienVault → Claude → Notion)
 0. Exit
 ```
 
-### Manual Pipeline workflow
+### Autonomous Pipeline workflow (Simply Cyber)
+1. Run `cpe` → select **1. Autonomous Pipeline**
+2. Enter date `YYYY-MM-DD` or blank for today
+3. Script fetches show notes, runs Claude analysis, writes `governance_input.txt`, pushes to Notion
+
+### Manual Pipeline workflow (other sources)
 1. Go to YouTube video → open transcript → toggle timestamps off → copy all text
-2. Paste transcript into Claude chat
+2. Paste transcript into Claude chat using `prompts/cpe_prompt_claude.txt`
 3. Claude generates `===INTEL_RECORD_START===` formatted records
 4. Copy records into `governance_input.txt`
-5. Run `cpe` → select **2. Manual Pipeline** → enter real YouTube URL
+5. Run `cpe` → select **2. Manual Pipeline** → enter source URL
 6. Records push to Notion CPE Tracker with CMMC linking and auto learning plan mapping
+
+### OTX Pipeline workflow
+1. Run `cpe` → select **4. OTX Pipeline**
+2. Script fetches last 24hrs of OTX pulses, filters by relevance, deduplicates
+3. Each pulse is sent to Claude individually using `OTX_ANALYST_PROMPT`
+4. All records batch-pushed to Notion under source label "AlienVault OTX"
 
 ---
 
@@ -755,3 +870,27 @@ Results deduplicated via `set()`, sorted, and pushed as a multi-relation. A sing
 | Week 33 | What is Integrated GRC? | `2d655ed7-4038-81d1-aadd-e7533308bb3d` |
 | Week 35 | Building GRC Roadmaps | `2d655ed7-4038-818b-a731-c3f7b76383cd` |
 | Week 36 | Developing Metrics & KPIs | `2d655ed7-4038-8171-9018-fe8f3fd34e73` |
+
+---
+
+## 16. Change Log — V6.1 → V7.0
+
+### Show Notes Pipeline (`get_show_notes()`)
+**Before (V6.1):** Choice 1 (Autonomous Pipeline) called `get_transcript()` → yt-dlp → Whisper. Blocked at network level for Simply Cyber. Choice 1 was effectively disabled for the primary source.
+
+**After (V7.0):** Choice 1 calls `get_show_notes()` which fetches from `cyberthreatbrief.simplycyber.io` via plain HTTP. No yt-dlp, no Whisper, no FFmpeg. Date-addressable for backfill. `get_transcript()` retained for non-blocked sources.
+
+### Per-Source Prompt Tuning (`analyze_with_claude_prompt()`)
+New overload of `analyze_with_claude()` that accepts a custom system prompt. Enables different sources to use different extraction instructions without branching the core analysis logic. `analyze_with_claude()` is unchanged and still used for Simply Cyber.
+
+### OTX Pipeline (Choice 4)
+New `get_otx_pulses()` function with three-gate filter (time → relevance → deduplication). Uses `OTX_ANALYST_PROMPT` and `analyze_with_claude_prompt()`. Requires `OTX_API_KEY` in `.env`. Each pulse is analyzed individually to prevent Claude from conflating content across pulses.
+
+### OTX_ANALYST_PROMPT Fix
+The V6 `OTX_ANALYST_PROMPT` construction had a no-op `.replace()` for `impacted_identity_provider` (target string didn't exist in `ANALYST_PROMPT`). `content_category` was defined in field definitions but absent from the schema block, so Claude never output it. V7 fixes both by patching the schema itself — pre-filling `content_type`, adding `content_category` and `impacted_identity_provider` to the `===INTEL_RECORD_START===` template.
+
+### `max_tokens` Increased to 16000
+V6 used `max_tokens=8000`. Dense episodes (8–10 stories) could cause Claude to truncate mid-record. V7 doubles this to 16000. `write_governance_file()` now checks for marker mismatches and warns if `START` and `END` counts differ (indicating truncation).
+
+### CMMC Cache Retry Loop
+`load_cmmc_cache()` now retries up to 3 times with a 15-second delay on Notion rate-limit errors. Non-rate-limit errors still fail immediately. Prevents session failures during high-load Notion API windows.
