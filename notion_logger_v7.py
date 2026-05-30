@@ -262,6 +262,9 @@ investigation_type::
 - **detection_opportunities**: Specific technical indicators or SOC triggers (comma-separated).
 - **control_domains**: Access Control (AC), Identification and Authentication (IA), Endpoint Security, Malware Protection, Logging and Monitoring (AU), Incident Response (IR), Threat Intelligence, Secure Configuration Management (CM), Cloud Security, API Security, Data Protection, Privacy and Compliance, Security Awareness and Training (AT), Risk Assessment (RA), Supply Chain Risk Management (SR), System Integrity (SI). Use full names exactly as shown.
 - **Master Frameworks(CMMC 2.0 / NIST 800-171)**: CMMC 2.0 Control IDs in exact format XX.L#-#.##.# (e.g., AC.L1-3.1.1, SI.L2-3.14.1, IR.L2-3.6.1). Comma-separated. Use "None" if no clear mapping.
+  CRITICAL EXCEPTIONS — these are frequent errors:
+  - IA 3.5.1 and 3.5.2: these originate from FAR 52.204-21 and are Level 1 practices in the DoD CMMC model. ALWAYS write IA.L1-3.5.1 and IA.L1-3.5.2. NEVER write IA.L2-3.5.1 or IA.L2-3.5.2 — those IDs do not exist in the official CMMC model.
+  - SR controls: valid requirement ranges are 3.15.x and 3.24.x ONLY (e.g., SR.L2-3.15.1, SR.L2-3.24.1). SR.L2-3.17.x does not exist — do NOT output any SR.3.17.x ID. Use "None" if no valid SR control applies.
 - **GRC_Learning_Plan_All_Phases**: Map to the most relevant week: "Week ## - [title]". Options: Week 25 - Developing security policies, Week 26 - Building compliance programs, Week 27 - Risk management frameworks. Leave blank if no match.
 - **identity_impact**: Who is impacted (comma-separated). Values: workforce-accounts, administrative-roles, system-administrators, security-operations, service-accounts, non-human-identities, executive-accounts, third-party-vendors, none, unknown.
 - **tags**: ALL MITRE IDs (lowercase) AND descriptive keywords (lowercase-hyphenated).
