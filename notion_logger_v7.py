@@ -460,22 +460,22 @@ def get_show_notes(target_date: str = None) -> tuple:
     return clean_text, episode_url
 
 
-def get_barricade_intel() -> tuple:
+def get_rss_episode_date() -> str:
     """
-    Fetches the most recent episode from the Simply Cyber RSS feed via feedparser.
+    Returns the publish date of the most recent Simply Cyber episode as YYYY-MM-DD.
 
-    Pulls the latest <description> tag, strips HTML markup, and runs the result
-    through scrub(). Returns the same (clean_text, canonical_url) contract as
-    get_show_notes() so it slots cleanly into the analyze_with_claude() call.
+    Parses the Transistor RSS feed and extracts pubDate from the latest entry.
+    Used by Choice 5 to auto-detect today's episode date without requiring
+    manual input, then passes the date to get_show_notes() for content fetch.
 
     Returns:
-        (clean_text, canonical_url) tuple
+        YYYY-MM-DD string from the latest entry's pubDate.
 
     Raises:
-        RuntimeError: Feed unreachable, parse failure, or no episodes found.
+        RuntimeError: Feed unreachable, parse failure, or no entries found.
     """
     FEED_URL = "https://feeds.transistor.fm/simply-cyber"
-    print(f"📡 Fetching RSS feed: {FEED_URL}...")
+    print(f"📡 Checking RSS feed for latest episode date: {FEED_URL}...")
 
     feed = feedparser.parse(FEED_URL)
 
@@ -485,22 +485,16 @@ def get_barricade_intel() -> tuple:
     if not feed.entries:
         raise RuntimeError("❌ No episodes found in feed.")
 
-    latest      = feed.entries[0]
-    episode_url = latest.get("link", FEED_URL)
-    title       = latest.get("title", "Unknown")
+    latest = feed.entries[0]
+    title  = latest.get("title", "Unknown")
 
-    print(f"📄 Latest episode: {title}")
+    parsed = latest.get("published_parsed")
+    if not parsed:
+        raise RuntimeError("❌ No pubDate found in latest feed entry.")
 
-    raw_desc = latest.get("summary", "") or ""
-    if not raw_desc:
-        raise RuntimeError("❌ No description found in latest episode.")
-
-    soup       = BeautifulSoup(raw_desc, "html.parser")
-    text       = soup.get_text(separator="\n", strip=True)
-    clean_text = scrub(text)
-
-    print(f"✅ Feed description ready: {len(clean_text.split()):,} words")
-    return clean_text, episode_url
+    date_str = f"{parsed.tm_year:04d}-{parsed.tm_mon:02d}-{parsed.tm_mday:02d}"
+    print(f"✅ Latest episode: {title} → {date_str}")
+    return date_str
 
 
 def analyze_with_claude(content: str, url: str, today: str) -> str:
@@ -1031,18 +1025,19 @@ def main():
 
         elif choice == "5":
             if TEST_MODE:
-                print("❌ RSS Feed mode disabled in --test.")
+                print("❌ RSS auto-detect mode disabled in --test.")
                 continue
             try:
-                content, url = get_barricade_intel()
-                raw_output = analyze_with_claude(content, url, date.today().isoformat())
+                date_str        = get_rss_episode_date()
+                content, url    = get_show_notes(date_str)
+                raw_output      = analyze_with_claude(content, url, date.today().isoformat())
                 write_governance_file(raw_output)
             except (RuntimeError, ValueError) as e:
                 print(f"❌ Pipeline failed: {e}")
                 continue
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
-            push_all(records, "Barricade Cyber Daily Threat Brief", url)
+            push_all(records, "Simply Cyber Daily Threat Brief", url)
 
     # ── Post-run audit ──────────────────────────────────────────
     if CMMC_MISSES:
