@@ -210,6 +210,7 @@ title::
 cpe_category::
 cpe_credits::
 content_type::
+content_category::
 threat_actor::
 target_sector::
 intel_category::
@@ -238,6 +239,7 @@ operational_relevance::
 executive_summary::
 dfir_phase::
 investigation_type::
+impacted_identity_provider::
 ===INTEL_RECORD_END===
 
 ### FIELD DEFINITIONS (STRICT)
@@ -315,17 +317,12 @@ Before finalizing output:
 # ===================================================================
 OTX_ANALYST_PROMPT = (
     ANALYST_PROMPT
-    # Schema: pre-fill content_type so Claude never defaults to "Podcast/Video";
-    # add content_category immediately after it (was absent from schema entirely)
+    # Schema: pre-fill content_type and content_category for OTX pulses.
+    # Both fields are now in the base schema; target the two-line sequence
+    # to avoid a duplicate content_category:: line.
     .replace(
-        'content_type::\n',
+        'content_type::\ncontent_category::\n',
         'content_type:: Threat Intelligence Feed\ncontent_category:: Threat Intelligence\n'
-    )
-    # Schema: add impacted_identity_provider before the closing marker
-    # (was absent from schema entirely — third replace in original was a no-op)
-    .replace(
-        'investigation_type::\n===INTEL_RECORD_END===',
-        'investigation_type::\nimpacted_identity_provider::\n===INTEL_RECORD_END==='
     )
     # Field def: explicitly forbid the Podcast/Video default
     .replace(
