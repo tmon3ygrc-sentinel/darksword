@@ -304,15 +304,35 @@ Before finalizing output:
 # ===================================================================
 # 4b. OTX ANALYST PROMPT (tuned for AlienVault pulse metadata)
 # ===================================================================
-OTX_ANALYST_PROMPT = ANALYST_PROMPT.replace(
-    '- **content_type**: Always "Podcast/Video".',
-    '- **content_type**: Always "Threat Intelligence Feed" for OTX pulses.'
-).replace(
-    '- **content_category**: Threat Intelligence, AI Governance / Privacy Law, Technical, Management, DFIR, Compliance, Strategic, Legal-Regulatory. Select closest match. Do NOT invent new categories.',
-    '- **content_category**: ALWAYS populate. Default to "Threat Intelligence" for OTX pulses unless content clearly indicates otherwise.'
-).replace(
-    '- **impacted_identity_provider**: ',
-    '- **impacted_identity_provider**: ALWAYS populate with relevant values. '
+OTX_ANALYST_PROMPT = (
+    ANALYST_PROMPT
+    # Schema: pre-fill content_type so Claude never defaults to "Podcast/Video";
+    # add content_category immediately after it (was absent from schema entirely)
+    .replace(
+        'content_type::\n',
+        'content_type:: Threat Intelligence Feed\ncontent_category:: Threat Intelligence\n'
+    )
+    # Schema: add impacted_identity_provider before the closing marker
+    # (was absent from schema entirely — third replace in original was a no-op)
+    .replace(
+        'investigation_type::\n===INTEL_RECORD_END===',
+        'investigation_type::\nimpacted_identity_provider::\n===INTEL_RECORD_END==='
+    )
+    # Field def: explicitly forbid the Podcast/Video default
+    .replace(
+        '- **content_type**: Always "Podcast/Video".',
+        '- **content_type**: ALWAYS "Threat Intelligence Feed" for OTX pulses. Do NOT use "Podcast/Video".'
+    )
+    # Field def: content_category with OTX default; add explicit "do not leave blank"
+    .replace(
+        '- **content_category**: Threat Intelligence, AI Governance / Privacy Law, Technical, Management, DFIR, Compliance, Strategic, Legal-Regulatory. Select closest match. Do NOT invent new categories.',
+        '- **content_category**: For OTX pulses, default to "Threat Intelligence". Override only if content is clearly advisory, compliance, or strategic. Do NOT leave blank.'
+    )
+    # Field def: inject impacted_identity_provider definition (missing from base prompt)
+    .replace(
+        '- **investigation_type**:',
+        '- **impacted_identity_provider**: Identity provider targeted by this threat. ALWAYS populate. Values (comma-separated): on-prem-ad, entra-id, okta, google-workspace, mfa-provider, aws-iam, none, unknown. Use "unknown" if unclear. Do NOT leave blank.\n- **investigation_type**:'
+    )
 )
 
 # ===================================================================
