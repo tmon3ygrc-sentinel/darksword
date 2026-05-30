@@ -15,6 +15,7 @@ function Write-Log ($msg) {
 Write-Log "=== DARKSWORD auto-run starting ==="
 Set-Location $ScriptDir
 
+$env:PYTHONIOENCODING = "utf-8"
 & $Python "notion_logger_v7.py" --auto *>&1 | ForEach-Object {
     $_ | Out-File -FilePath $LogFile -Append -Encoding utf8
     Write-Host $_
