@@ -302,6 +302,20 @@ Before finalizing output:
 """
 
 # ===================================================================
+# 4b. OTX ANALYST PROMPT (tuned for AlienVault pulse metadata)
+# ===================================================================
+OTX_ANALYST_PROMPT = ANALYST_PROMPT.replace(
+    '- **content_type**: Always "Podcast/Video".',
+    '- **content_type**: Always "Threat Intelligence Feed" for OTX pulses.'
+).replace(
+    '- **content_category**: Threat Intelligence, AI Governance / Privacy Law, Technical, Management, DFIR, Compliance, Strategic, Legal-Regulatory. Select closest match. Do NOT invent new categories.',
+    '- **content_category**: ALWAYS populate. Default to "Threat Intelligence" for OTX pulses unless content clearly indicates otherwise.'
+).replace(
+    '- **impacted_identity_provider**: ',
+    '- **impacted_identity_provider**: ALWAYS populate with relevant values. '
+)
+
+# ===================================================================
 # 5. UTILITY FUNCTIONS
 # ===================================================================
 
@@ -452,6 +466,29 @@ def analyze_with_claude(content: str, url: str, today: str) -> str:
         ]
     )
 
+    raw_output = message.content[0].text
+    record_count = raw_output.count("===INTEL_RECORD_START===")
+    print(f"✅ Claude analysis complete — {record_count} record(s) extracted")
+    return raw_output
+
+def analyze_with_claude_prompt(content: str, url: str, today: str, prompt: str) -> str:
+    """
+    Same as analyze_with_claude() but accepts a custom system prompt.
+    Used for non-show-notes sources like OTX that need tailored extraction.
+    """
+    print("🧠 Analyzing with Claude (claude-sonnet-4-6)...")
+    user_message = (
+        f"Source URL: {url}\n"
+        f"Date Watched: {today}\n\n"
+        f"CONTENT:\n{content}\n\n"
+        f"[END OF TRANSCRIPT - BEGIN ANALYSIS]"
+    )
+    message = claude.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=16000,
+        system=prompt,
+        messages=[{"role": "user", "content": user_message}]
+    )
     raw_output = message.content[0].text
     record_count = raw_output.count("===INTEL_RECORD_START===")
     print(f"✅ Claude analysis complete — {record_count} record(s) extracted")
@@ -912,10 +949,11 @@ def main():
             print(f"\n📋 Sending {len(pulses)} pulse(s) to Claude...")
             all_records = []
             for pulse in pulses:
-                raw = analyze_with_claude(
+                raw = analyze_with_claude_prompt(
                     pulse["content"],
                     pulse["url"],
-                    date.today().isoformat()
+                    date.today().isoformat(),
+                    OTX_ANALYST_PROMPT
                 )
                 write_governance_file(raw)
                 records = parse_records(SCRIPT_DIR / "governance_input.txt")
