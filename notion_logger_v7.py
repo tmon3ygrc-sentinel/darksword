@@ -47,7 +47,12 @@ SCRIPT_DIR = Path(__file__).parent.absolute()
 load_dotenv(dotenv_path=SCRIPT_DIR / ".env")
 
 # Run with: python notion_logger_v7.py --test
+# Run with: python notion_logger_v7.py --auto   (non-interactive, for Task Scheduler)
 TEST_MODE = "--test" in sys.argv
+AUTO_MODE = "--auto" in sys.argv
+
+if TEST_MODE and AUTO_MODE:
+    raise ValueError("❌ --test and --auto are mutually exclusive.")
 
 NOTION_TOKEN      = os.getenv("NOTION_TOKEN")
 DATABASE_ID       = os.getenv("DATABASE_ID")
@@ -939,11 +944,28 @@ def main():
     print("⚔️   DARKSWORD — GRC Intelligence Platform V7.0")
     if TEST_MODE:
         print("     💡 TEST MODE  |  $0.00  |  API Disconnected")
+    elif AUTO_MODE:
+        print("     🤖 AUTO MODE  |  RSS → Show Notes → Claude → Notion")
     else:
         print("     🔴 LIVE MODE  |  API Connected")
     print("="*60)
 
     load_cmmc_cache()
+
+    if AUTO_MODE:
+        print("\n⚡ Auto-run: Choice 5 (RSS date detection → Show Notes → Notion)")
+        try:
+            date_str     = get_rss_episode_date()
+            content, url = get_show_notes(date_str)
+            raw_output   = analyze_with_claude(content, url, date.today().isoformat())
+            write_governance_file(raw_output)
+        except (RuntimeError, ValueError) as e:
+            print(f"❌ Auto pipeline failed: {e}")
+            sys.exit(1)
+        records = parse_records(SCRIPT_DIR / "governance_input.txt")
+        print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
+        push_all(records, "Simply Cyber Daily Threat Brief", url)
+        return
 
     while True:
         print("\n1. Autonomous Pipeline  (Show Notes → Claude → Notion)")
