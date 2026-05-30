@@ -31,6 +31,7 @@ import re
 import sys
 import time
 import anthropic
+import feedparser
 import requests
 from datetime import date
 from pathlib import Path
@@ -456,6 +457,49 @@ def get_show_notes(target_date: str = None) -> tuple:
     clean_text = scrub(raw_text)
 
     print(f"✅ Show notes ready: {len(clean_text.split()):,} words")
+    return clean_text, episode_url
+
+
+def get_barricade_intel() -> tuple:
+    """
+    Fetches the most recent episode from the Simply Cyber RSS feed via feedparser.
+
+    Pulls the latest <description> tag, strips HTML markup, and runs the result
+    through scrub(). Returns the same (clean_text, canonical_url) contract as
+    get_show_notes() so it slots cleanly into the analyze_with_claude() call.
+
+    Returns:
+        (clean_text, canonical_url) tuple
+
+    Raises:
+        RuntimeError: Feed unreachable, parse failure, or no episodes found.
+    """
+    FEED_URL = "https://feeds.transistor.fm/simply-cyber"
+    print(f"📡 Fetching RSS feed: {FEED_URL}...")
+
+    feed = feedparser.parse(FEED_URL)
+
+    if feed.bozo and not feed.entries:
+        raise RuntimeError(f"❌ RSS feed parse failed: {feed.bozo_exception}")
+
+    if not feed.entries:
+        raise RuntimeError("❌ No episodes found in feed.")
+
+    latest      = feed.entries[0]
+    episode_url = latest.get("link", FEED_URL)
+    title       = latest.get("title", "Unknown")
+
+    print(f"📄 Latest episode: {title}")
+
+    raw_desc = latest.get("summary", "") or ""
+    if not raw_desc:
+        raise RuntimeError("❌ No description found in latest episode.")
+
+    soup       = BeautifulSoup(raw_desc, "html.parser")
+    text       = soup.get_text(separator="\n", strip=True)
+    clean_text = scrub(text)
+
+    print(f"✅ Feed description ready: {len(clean_text.split()):,} words")
     return clean_text, episode_url
 
 
@@ -913,6 +957,7 @@ def main():
         if TEST_MODE:
             print("3. Test Pipeline        (Mock data → Notion) ← YOU ARE HERE")
         print("4. OTX Pipeline         (AlienVault → Claude → Notion)")
+        print("5. RSS Feed Pipeline    (Barricade Cyber → Claude → Notion)")
         print("0. Exit")
 
         choice = input("\nSelection: ").strip()
@@ -983,6 +1028,21 @@ def main():
                 all_records.extend(records)
             print(f"\n📋 Pushing {len(all_records)} record(s) to Notion...")
             push_all(all_records, "AlienVault OTX", "https://otx.alienvault.com")
+
+        elif choice == "5":
+            if TEST_MODE:
+                print("❌ RSS Feed mode disabled in --test.")
+                continue
+            try:
+                content, url = get_barricade_intel()
+                raw_output = analyze_with_claude(content, url, date.today().isoformat())
+                write_governance_file(raw_output)
+            except (RuntimeError, ValueError) as e:
+                print(f"❌ Pipeline failed: {e}")
+                continue
+            records = parse_records(SCRIPT_DIR / "governance_input.txt")
+            print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
+            push_all(records, "Barricade Cyber Daily Threat Brief", url)
 
     # ── Post-run audit ──────────────────────────────────────────
     if CMMC_MISSES:
