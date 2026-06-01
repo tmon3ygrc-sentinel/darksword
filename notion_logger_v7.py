@@ -267,7 +267,7 @@ impacted_identity_provider::
 - **priority_level**: Critical, High, Medium, or Low.
 - **exploit_maturity**: poc, functional, weaponized, living-off-the-land, automated, theoretical, unknown.
 - **risk_severity_score**: 0-10.
-- **detection_opportunities**: Specific technical indicators or SOC triggers (comma-separated).
+- **detection_opportunities**: Short hyphenated tags only, max 5 words each, comma-separated. NO full sentences. Examples: anomalous-powershell-execution, mfa-device-enrollment, lateral-movement-smb, dns-beaconing-detected, unsigned-driver-load. Format: lowercase-hyphenated-slug. Max 6 tags per record.
 - **control_domains**: Access Control (AC), Identification and Authentication (IA), Endpoint Security, Malware Protection, Logging and Monitoring (AU), Incident Response (IR), Threat Intelligence, Configuration Management (CM), Cloud Security, API Security, Data Protection, Privacy and Compliance, Security Awareness and Training (AT), Risk Assessment (RA), Supply Chain Risk Management (SR), System Integrity (SI). Use full names exactly as shown.
 - **Master Frameworks(CMMC 2.0 / NIST 800-171)**: CMMC 2.0 Control IDs in exact format XX.L#-#.##.# (e.g., AC.L1-3.1.1, SI.L2-3.14.1, IR.L2-3.6.1). Comma-separated. Use "None" if no clear mapping.
   CRITICAL EXCEPTIONS — these are frequent errors:
