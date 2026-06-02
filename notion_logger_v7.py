@@ -47,12 +47,18 @@ SCRIPT_DIR = Path(__file__).parent.absolute()
 load_dotenv(dotenv_path=SCRIPT_DIR / ".env")
 
 # Run with: python notion_logger_v7.py --test
-# Run with: python notion_logger_v7.py --auto   (non-interactive, for Task Scheduler)
-TEST_MODE = "--test" in sys.argv
-AUTO_MODE = "--auto" in sys.argv
+# Run with: python notion_logger_v7.py --auto      (non-interactive, for Task Scheduler)
+# Run with: python notion_logger_v7.py --auto-otx  (non-interactive OTX pipeline only)
+TEST_MODE    = "--test"     in sys.argv
+AUTO_MODE    = "--auto"     in sys.argv
+AUTO_OTX_MODE = "--auto-otx" in sys.argv
 
 if TEST_MODE and AUTO_MODE:
     raise ValueError("❌ --test and --auto are mutually exclusive.")
+if TEST_MODE and AUTO_OTX_MODE:
+    raise ValueError("❌ --test and --auto-otx are mutually exclusive.")
+if AUTO_MODE and AUTO_OTX_MODE:
+    raise ValueError("❌ --auto and --auto-otx are mutually exclusive.")
 
 NOTION_TOKEN      = os.getenv("NOTION_TOKEN")
 DATABASE_ID       = os.getenv("DATABASE_ID")
@@ -943,6 +949,8 @@ def main():
         print("     💡 TEST MODE  |  $0.00  |  API Disconnected")
     elif AUTO_MODE:
         print("     🤖 AUTO MODE  |  RSS → Show Notes → Claude → Notion")
+    elif AUTO_OTX_MODE:
+        print("     🤖 AUTO-OTX   |  AlienVault OTX → Claude → Notion")
     else:
         print("     🔴 LIVE MODE  |  API Connected")
     print("="*60)
@@ -962,6 +970,36 @@ def main():
         records = parse_records(SCRIPT_DIR / "governance_input.txt")
         print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
         push_all(records, "Simply Cyber Daily Threat Brief", url)
+        return
+
+    if AUTO_OTX_MODE:
+        print("\n⚡ Auto-OTX: Choice 4 (AlienVault OTX → Claude → Notion)")
+        otx_key = os.getenv("OTX_API_KEY")
+        if not otx_key:
+            print("❌ OTX_API_KEY not set in .env")
+            sys.exit(1)
+        try:
+            pulses = get_otx_pulses(otx_key)
+        except RuntimeError as e:
+            print(f"❌ OTX fetch failed: {e}")
+            sys.exit(1)
+        if not pulses:
+            print("✅ No relevant pulses found in last 24hrs — nothing to push.")
+            return
+        print(f"\n📋 Sending {len(pulses)} pulse(s) to Claude...")
+        all_records = []
+        for pulse in pulses:
+            raw = analyze_with_claude_prompt(
+                pulse["content"],
+                pulse["url"],
+                date.today().isoformat(),
+                OTX_ANALYST_PROMPT
+            )
+            write_governance_file(raw)
+            records = parse_records(SCRIPT_DIR / "governance_input.txt")
+            all_records.extend(records)
+        print(f"\n📋 Pushing {len(all_records)} record(s) to Notion...")
+        push_all(all_records, "AlienVault OTX", "https://otx.alienvault.com")
         return
 
     while True:
