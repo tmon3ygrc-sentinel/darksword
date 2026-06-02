@@ -521,15 +521,16 @@ def get_barricade_latest() -> tuple[str, str] | None:
     Returns (video_id, title) for the most recent playable Barricade Cyber video,
     or None if the newest ingestable entry was already ingested.
 
-    Polls the YouTube channel RSS feed (up to 15 entries). Skips restricted or
-    transcript-unavailable videos and tries the next entry. Stops and returns
-    None as soon as a candidate matches barricade_last_ingested.txt (nothing new).
-    Deduplication file missing is treated as no prior ingest.
+    Polls the YouTube channel RSS feed (up to 15 entries). Each candidate is
+    probed with ytt.fetch(); any exception means the video is skipped and the
+    next entry is tried. Only returns a video ID that successfully fetched a
+    transcript. Does NOT write barricade_last_ingested.txt — the caller must
+    do that after a successful push.
 
     Raises:
         RuntimeError: Feed unreachable, parse failure, or all 15 entries restricted.
     """
-    from youtube_transcript_api import YouTubeTranscriptApi, VideoUnplayable
+    from youtube_transcript_api import YouTubeTranscriptApi
 
     FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UCLco-g6YIjhPqOBBR6CUXpg"
     print(f"📡 Checking Barricade Cyber RSS feed...")
@@ -562,14 +563,10 @@ def get_barricade_latest() -> tuple[str, str] | None:
 
         try:
             ytt.fetch(video_id)
-        except VideoUnplayable:
-            print(f"⛔  Restricted/unplayable: {title} ({video_id}) — trying next.")
-            continue
         except Exception as e:
-            print(f"⚠️  Transcript unavailable for {video_id}: {e} — trying next.")
+            print(f"⛔  Skipping {title} ({video_id}): {e}")
             continue
 
-        BARRICADE_LAST_FILE.write_text(video_id, encoding="utf-8")
         print(f"✅ New video: {title} (ID: {video_id})")
         return video_id, title
 
@@ -1116,6 +1113,7 @@ def main():
         records = parse_records(SCRIPT_DIR / "governance_input.txt")
         print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
         push_all(records, "Barricade Cyber", url)
+        BARRICADE_LAST_FILE.write_text(video_id, encoding="utf-8")
         return
 
     while True:
