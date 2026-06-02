@@ -47,18 +47,26 @@ SCRIPT_DIR = Path(__file__).parent.absolute()
 load_dotenv(dotenv_path=SCRIPT_DIR / ".env")
 
 # Run with: python notion_logger_v7.py --test
-# Run with: python notion_logger_v7.py --auto      (non-interactive, for Task Scheduler)
-# Run with: python notion_logger_v7.py --auto-otx  (non-interactive OTX pipeline only)
-TEST_MODE    = "--test"     in sys.argv
-AUTO_MODE    = "--auto"     in sys.argv
-AUTO_OTX_MODE = "--auto-otx" in sys.argv
+# Run with: python notion_logger_v7.py --auto           (non-interactive, for Task Scheduler)
+# Run with: python notion_logger_v7.py --auto-otx       (non-interactive OTX pipeline only)
+# Run with: python notion_logger_v7.py --auto-barricade (non-interactive Barricade Cyber pipeline)
+TEST_MODE          = "--test"           in sys.argv
+AUTO_MODE          = "--auto"           in sys.argv
+AUTO_OTX_MODE      = "--auto-otx"      in sys.argv
+AUTO_BARRICADE_MODE = "--auto-barricade" in sys.argv
 
 if TEST_MODE and AUTO_MODE:
     raise ValueError("❌ --test and --auto are mutually exclusive.")
 if TEST_MODE and AUTO_OTX_MODE:
     raise ValueError("❌ --test and --auto-otx are mutually exclusive.")
+if TEST_MODE and AUTO_BARRICADE_MODE:
+    raise ValueError("❌ --test and --auto-barricade are mutually exclusive.")
 if AUTO_MODE and AUTO_OTX_MODE:
     raise ValueError("❌ --auto and --auto-otx are mutually exclusive.")
+if AUTO_MODE and AUTO_BARRICADE_MODE:
+    raise ValueError("❌ --auto and --auto-barricade are mutually exclusive.")
+if AUTO_OTX_MODE and AUTO_BARRICADE_MODE:
+    raise ValueError("❌ --auto-otx and --auto-barricade are mutually exclusive.")
 
 NOTION_TOKEN      = os.getenv("NOTION_TOKEN")
 DATABASE_ID       = os.getenv("DATABASE_ID")
@@ -503,6 +511,38 @@ def get_rss_episode_date() -> str:
     date_str = f"{parsed.tm_year:04d}-{parsed.tm_mon:02d}-{parsed.tm_mday:02d}"
     print(f"✅ Latest episode: {title} → {date_str}")
     return date_str
+
+
+def get_barricade_latest() -> tuple[str, str]:
+    """
+    Returns (video_id, title) for the most recent Barricade Cyber YouTube video.
+
+    Polls the YouTube channel RSS feed for channel UCLco-g6YIjhPqOBBR6CUXpg.
+    feedparser exposes the video ID via the yt_videoid attribute on each entry.
+
+    Raises:
+        RuntimeError: Feed unreachable, parse failure, or no entries found.
+    """
+    FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UCLco-g6YIjhPqOBBR6CUXpg"
+    print(f"📡 Checking Barricade Cyber RSS feed...")
+
+    feed = feedparser.parse(FEED_URL)
+
+    if feed.bozo and not feed.entries:
+        raise RuntimeError(f"❌ Barricade RSS feed parse failed: {feed.bozo_exception}")
+
+    if not feed.entries:
+        raise RuntimeError("❌ No videos found in Barricade Cyber feed.")
+
+    latest   = feed.entries[0]
+    title    = latest.get("title", "Unknown")
+    video_id = latest.get("yt_videoid") or latest.get("id", "").split(":")[-1]
+
+    if not video_id:
+        raise RuntimeError("❌ Could not extract video ID from Barricade feed entry.")
+
+    print(f"✅ Latest video: {title} (ID: {video_id})")
+    return video_id, title
 
 
 def analyze_with_claude(content: str, url: str, today: str) -> str:
@@ -967,7 +1007,9 @@ def main():
     elif AUTO_MODE:
         print("     🤖 AUTO MODE  |  RSS → Show Notes → Claude → Notion")
     elif AUTO_OTX_MODE:
-        print("     🤖 AUTO-OTX   |  AlienVault OTX → Claude → Notion")
+        print("     🤖 AUTO-OTX        |  AlienVault OTX → Claude → Notion")
+    elif AUTO_BARRICADE_MODE:
+        print("     🤖 AUTO-BARRICADE  |  Barricade Cyber → Claude → Notion")
     else:
         print("     🔴 LIVE MODE  |  API Connected")
     print("="*60)
@@ -1017,6 +1059,26 @@ def main():
             all_records.extend(records)
         print(f"\n📋 Pushing {len(all_records)} record(s) to Notion...")
         push_all(all_records, "AlienVault OTX", "https://otx.alienvault.com")
+        return
+
+    if AUTO_BARRICADE_MODE:
+        print("\n⚡ Auto-Barricade: (YouTube RSS → Transcript → Claude → Notion)")
+        try:
+            video_id, _title = get_barricade_latest()
+        except RuntimeError as e:
+            print(f"❌ Barricade RSS fetch failed: {e}")
+            sys.exit(1)
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        try:
+            content = get_barricade_intel(url)
+            raw_output = analyze_with_claude(content, url, date.today().isoformat())
+            write_governance_file(raw_output)
+        except (RuntimeError, ValueError) as e:
+            print(f"❌ Barricade pipeline failed: {e}")
+            sys.exit(1)
+        records = parse_records(SCRIPT_DIR / "governance_input.txt")
+        print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
+        push_all(records, "Barricade Cyber", url)
         return
 
     while True:
