@@ -44,3 +44,4 @@ governance_input.txt
 *.bak
 client_secrets.json
 token.pickle
+barricade_last_ingested.txt
