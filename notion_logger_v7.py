@@ -518,17 +518,19 @@ BARRICADE_LAST_FILE = SCRIPT_DIR / "barricade_last_ingested.txt"
 
 def get_barricade_latest() -> tuple[str, str] | None:
     """
-    Returns (video_id, title) for the most recent Barricade Cyber YouTube video,
-    or None if the latest video was already ingested.
+    Returns (video_id, title) for the most recent playable Barricade Cyber video,
+    or None if the newest ingestable entry was already ingested.
 
-    Polls the YouTube channel RSS feed for channel UCLco-g6YIjhPqOBBR6CUXpg.
-    feedparser exposes the video ID via the yt_videoid attribute on each entry.
-    Deduplication is tracked via barricade_last_ingested.txt; a missing file
-    is treated as no prior ingest.
+    Polls the YouTube channel RSS feed (up to 15 entries). Skips restricted or
+    transcript-unavailable videos and tries the next entry. Stops and returns
+    None as soon as a candidate matches barricade_last_ingested.txt (nothing new).
+    Deduplication file missing is treated as no prior ingest.
 
     Raises:
-        RuntimeError: Feed unreachable, parse failure, or no entries found.
+        RuntimeError: Feed unreachable, parse failure, or all 15 entries restricted.
     """
+    from youtube_transcript_api import YouTubeTranscriptApi, VideoUnplayable
+
     FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UCLco-g6YIjhPqOBBR6CUXpg"
     print(f"📡 Checking Barricade Cyber RSS feed...")
 
@@ -540,25 +542,38 @@ def get_barricade_latest() -> tuple[str, str] | None:
     if not feed.entries:
         raise RuntimeError("❌ No videos found in Barricade Cyber feed.")
 
-    latest   = feed.entries[0]
-    title    = latest.get("title", "Unknown")
-    video_id = latest.get("yt_videoid") or latest.get("id", "").split(":")[-1]
-
-    if not video_id:
-        raise RuntimeError("❌ Could not extract video ID from Barricade feed entry.")
-
     try:
         last_id = BARRICADE_LAST_FILE.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         last_id = ""
 
-    if video_id == last_id:
-        print(f"⏭️  Already ingested: {title} ({video_id}) — skipping.")
-        return None
+    ytt = YouTubeTranscriptApi()
 
-    BARRICADE_LAST_FILE.write_text(video_id, encoding="utf-8")
-    print(f"✅ New video: {title} (ID: {video_id})")
-    return video_id, title
+    for entry in feed.entries[:15]:
+        title    = entry.get("title", "Unknown")
+        video_id = entry.get("yt_videoid") or entry.get("id", "").split(":")[-1]
+
+        if not video_id:
+            continue
+
+        if video_id == last_id:
+            print(f"⏭️  Already ingested: {title} ({video_id}) — nothing new.")
+            return None
+
+        try:
+            ytt.fetch(video_id)
+        except VideoUnplayable:
+            print(f"⛔  Restricted/unplayable: {title} ({video_id}) — trying next.")
+            continue
+        except Exception as e:
+            print(f"⚠️  Transcript unavailable for {video_id}: {e} — trying next.")
+            continue
+
+        BARRICADE_LAST_FILE.write_text(video_id, encoding="utf-8")
+        print(f"✅ New video: {title} (ID: {video_id})")
+        return video_id, title
+
+    raise RuntimeError("❌ All 15 RSS entries are restricted or have no transcript available.")
 
 
 def analyze_with_claude(content: str, url: str, today: str) -> str:
@@ -778,12 +793,15 @@ def get_barricade_intel(url: str) -> str:
     Fetches a YouTube transcript via YouTubeTranscriptApi for Barricade Cyber
     (and other non-blocked sources). Avoids yt-dlp/Whisper/FFmpeg entirely.
     """
-    from youtube_transcript_api import YouTubeTranscriptApi
+    from youtube_transcript_api import YouTubeTranscriptApi, VideoUnplayable
 
     video_id = extract_video_id(url)
     print(f"📡 Fetching transcript for video {video_id}...")
     ytt = YouTubeTranscriptApi()
-    transcript = ytt.fetch(video_id)
+    try:
+        transcript = ytt.fetch(video_id)
+    except VideoUnplayable:
+        raise RuntimeError(f"❌ Video {video_id} is unplayable or restricted — no transcript available.")
     raw_text = " ".join(snippet.text for snippet in transcript)
     clean_text = scrub(raw_text)
     print(f"✅ Transcript ready: {len(clean_text.split()):,} words")
