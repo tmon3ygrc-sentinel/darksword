@@ -513,12 +513,18 @@ def get_rss_episode_date() -> str:
     return date_str
 
 
-def get_barricade_latest() -> tuple[str, str]:
+BARRICADE_LAST_FILE = SCRIPT_DIR / "barricade_last_ingested.txt"
+
+
+def get_barricade_latest() -> tuple[str, str] | None:
     """
-    Returns (video_id, title) for the most recent Barricade Cyber YouTube video.
+    Returns (video_id, title) for the most recent Barricade Cyber YouTube video,
+    or None if the latest video was already ingested.
 
     Polls the YouTube channel RSS feed for channel UCLco-g6YIjhPqOBBR6CUXpg.
     feedparser exposes the video ID via the yt_videoid attribute on each entry.
+    Deduplication is tracked via barricade_last_ingested.txt; a missing file
+    is treated as no prior ingest.
 
     Raises:
         RuntimeError: Feed unreachable, parse failure, or no entries found.
@@ -541,7 +547,17 @@ def get_barricade_latest() -> tuple[str, str]:
     if not video_id:
         raise RuntimeError("❌ Could not extract video ID from Barricade feed entry.")
 
-    print(f"✅ Latest video: {title} (ID: {video_id})")
+    try:
+        last_id = BARRICADE_LAST_FILE.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        last_id = ""
+
+    if video_id == last_id:
+        print(f"⏭️  Already ingested: {title} ({video_id}) — skipping.")
+        return None
+
+    BARRICADE_LAST_FILE.write_text(video_id, encoding="utf-8")
+    print(f"✅ New video: {title} (ID: {video_id})")
     return video_id, title
 
 
@@ -1064,10 +1080,13 @@ def main():
     if AUTO_BARRICADE_MODE:
         print("\n⚡ Auto-Barricade: (YouTube RSS → Transcript → Claude → Notion)")
         try:
-            video_id, _title = get_barricade_latest()
+            result = get_barricade_latest()
         except RuntimeError as e:
             print(f"❌ Barricade RSS fetch failed: {e}")
             sys.exit(1)
+        if result is None:
+            return  # already ingested; exit cleanly
+        video_id, _title = result
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
             content = get_barricade_intel(url)
