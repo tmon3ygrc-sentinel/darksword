@@ -716,6 +716,23 @@ def get_transcript(url: str) -> str:
     print(f"✅ Transcript ready: {len(clean_text.split()):,} words")
     return clean_text
 
+
+def get_barricade_intel(url: str) -> str:
+    """
+    Fetches a YouTube transcript via YouTubeTranscriptApi for Barricade Cyber
+    (and other non-blocked sources). Avoids yt-dlp/Whisper/FFmpeg entirely.
+    """
+    from youtube_transcript_api import YouTubeTranscriptApi
+
+    video_id = extract_video_id(url)
+    print(f"📡 Fetching transcript for video {video_id}...")
+    ytt = YouTubeTranscriptApi()
+    transcript = ytt.fetch(video_id)
+    raw_text = " ".join(snippet.text for snippet in transcript)
+    clean_text = scrub(raw_text)
+    print(f"✅ Transcript ready: {len(clean_text.split()):,} words")
+    return clean_text
+
 # ===================================================================
 # 7. NOTION FUNCTIONS
 # ===================================================================
@@ -1009,6 +1026,7 @@ def main():
             print("3. Test Pipeline        (Mock data → Notion) ← YOU ARE HERE")
         print("4. OTX Pipeline         (AlienVault → Claude → Notion)")
         print("5. RSS Feed Pipeline    (Barricade Cyber → Claude → Notion)")
+        print("6. Barricade Cyber      (YouTube Transcript → Claude → Notion)")
         print("0. Exit")
 
         choice = input("\nSelection: ").strip()
@@ -1095,6 +1113,22 @@ def main():
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
             push_all(records, "Simply Cyber Daily Threat Brief", url)
+
+        elif choice == "6":
+            if TEST_MODE:
+                print("❌ Barricade Cyber mode disabled in --test.")
+                continue
+            url = input("Barricade Cyber YouTube URL: ").strip()
+            try:
+                content = get_barricade_intel(url)
+                raw_output = analyze_with_claude(content, url, date.today().isoformat())
+                write_governance_file(raw_output)
+            except (RuntimeError, ValueError) as e:
+                print(f"❌ Pipeline failed: {e}")
+                continue
+            records = parse_records(SCRIPT_DIR / "governance_input.txt")
+            print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
+            push_all(records, "Barricade Cyber", url)
 
     # ── Post-run audit ──────────────────────────────────────────
     if CMMC_MISSES:
