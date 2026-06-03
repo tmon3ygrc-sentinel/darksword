@@ -262,7 +262,7 @@ impacted_identity_provider::
 - **intel_timestamp**: ISO 8601. If time unknown, DEFAULT TO T14:00:00Z.
 - **date_watched**: Date content was consumed (YYYY-MM-DD).
 - **source**: Full name of source channel (e.g., Simply Cyber).
-- **source_show**: The specific show or program name (e.g., Simply Cyber Daily Threat Brief).
+- **source_show**: Use ONLY these canonical values — "Simply Cyber Daily Threat Brief" for Simply Cyber content, "AlienVault OTX" for OTX pulses, "Barricade Cyber" for Barricade content.
 - **url**: Direct link to the source/video.
 - **title**: Concise, professional title of the specific threat event.
 - **cpe_category**: Always "Technical" unless specified.
