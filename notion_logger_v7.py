@@ -1124,6 +1124,7 @@ def main():
         print("4. OTX Pipeline         (AlienVault → Claude → Notion)")
         print("5. RSS Feed Pipeline    (Barricade Cyber → Claude → Notion)")
         print("6. Barricade Cyber      (YouTube Transcript → Claude → Notion)")
+        print("7. Simply Cyber YouTube (YouTube Transcript → Claude → Notion)  ← show notes fallback")
         print("0. Exit")
 
         choice = input("\nSelection: ").strip()
@@ -1226,6 +1227,22 @@ def main():
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
             push_all(records, "Barricade Cyber", url)
+
+        elif choice == "7":
+            if TEST_MODE:
+                print("❌ Simply Cyber YouTube fallback disabled in --test.")
+                continue
+            url = input("Simply Cyber YouTube URL: ").strip()
+            try:
+                content = get_barricade_intel(url)
+                raw_output = analyze_with_claude(content, url, date.today().isoformat())
+                write_governance_file(raw_output)
+            except (RuntimeError, ValueError) as e:
+                print(f"❌ Pipeline failed: {e}")
+                continue
+            records = parse_records(SCRIPT_DIR / "governance_input.txt")
+            print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
+            push_all(records, "Simply Cyber Daily Threat Brief", url)
 
     # ── Post-run audit ──────────────────────────────────────────
     if CMMC_MISSES:
