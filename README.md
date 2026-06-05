@@ -10,6 +10,22 @@ Current build: `d2030d1`
 
 ---
 
+## Mission
+
+The asymmetry is real.
+
+Nation-state actors and ransomware operators are already leveraging AI to scale attacks, accelerate reconnaissance, and craft more convincing social engineering — at a pace no human analyst can match alone.
+
+DARKSWORD exists to close that gap.
+
+A solo GRC analyst with a spreadsheet isn't a fair fight against an AI-augmented adversary. But a GRC analyst running an autonomous intelligence pipeline that ingests multiple threat feeds daily, maps every story to CMMC 2.0 controls, maintains a living audit trail, and surfaces critical threat intensity across 131 controls — that's a different posture entirely.
+
+This project is proof that defenders can use the same technology to build leverage. Not to replace analyst judgment — but to amplify it.
+
+The threat actors aren't waiting. Neither should you.
+
+---
+
 ## Architecture
 
 ```
