@@ -6,69 +6,65 @@ A multi-source intelligence pipeline that ingests daily security content from sh
 
 Built as part of the **STAR Project** (Self-Transformation through Adversarial Rigor) — a hands-on vCISO development program. Manual mastery first, automation second.
 
+Current build: `d2030d1`
+
 ---
 
 ## Architecture
 
 ```
-Simply Cyber (show notes)    AlienVault OTX (feed)    Barricade Cyber (YouTube)
-         ↓                           ↓                          ↓
-  get_show_notes()           get_otx_pulses()           get_transcript()
-         ↓                           ↓                          ↓
-  analyze_with_claude()  analyze_with_claude_prompt()  analyze_with_claude()
-         ↓                           ↓                          ↓
-         └───────────────────────────┘                 barricade_input.txt
-                          ↓                                     ↓
-               governance_input.txt                     threat_ingest.py
-                          ↓                              [Barricade Engine]
-               notion_logger_v7.py                              ↓
-                [DARKSWORD Engine]                  Strategy & Architecture DB
-                          ↓                        ↙
-                   CPE Tracker DB
-                          ↘                   ↙
-                    Master Frameworks DB (CMMC 2.0)
-                         [Source of Truth]
-                               ↓
-                    GRC Learning Plan DB
-                    [Auto-linked by content]
+Simply Cyber (show notes / YouTube)     AlienVault OTX (feed)     Barricade Cyber (YouTube)
+              ↓                                   ↓                         ↓
+  get_show_notes() [primary]            get_otx_pulses()          get_barricade_latest() [RSS]
+  get_barricade_intel() [<500w fallback]         ↓                get_barricade_intel() [transcript]
+              ↓                    analyze_with_claude_prompt()             ↓
+  analyze_with_claude()              (OTX_ANALYST_PROMPT)        analyze_with_claude()
+              ↓                                   ↓                         ↓
+              └───────────────────────────────────┘─────────────────────────┘
+                                          ↓
+                               governance_input.txt
+                                          ↓
+                               notion_logger_v7.py
+                                [DARKSWORD Engine]
+                                          ↓
+                                   CPE Tracker DB
+                                    ↙         ↘
+                    Master Frameworks DB     GRC Learning Plan DB
+                      (CMMC 2.0)              [Auto-linked by content]
 ```
 
 ### Databases (Notion)
 
 | Database | Script | Source | Purpose |
 |---|---|---|---|
-| CPE Tracker | `notion_logger_v7.py` | Simply Cyber, AlienVault OTX | Tactical threat intel |
-| STAR Strategy | `threat_ingest.py` | Barricade Cyber | Strategic architecture |
+| CPE Tracker | `notion_logger_v7.py` | Simply Cyber, AlienVault OTX, Barricade Cyber | Tactical threat intel |
+| STAR Strategy | `threat_ingest.py` | Barricade Cyber (legacy engine) | Strategic architecture |
 | Master Frameworks | shared | CMMC 2.0 | Control mapping (source of truth) |
 | GRC Learning Plan | shared | Internal | Auto-linked from control domains |
-| Cybernews Intel | *(planned)* | Cybernews | Threat actor profiles |
 
 ---
 
 ## Workspace Structure
 
-This project spans two VS Code workspaces:
-
 ```
 STAR_PROJECT (GRC-OCEG)
 └── darksword/
-    ├── notion_logger_v7.py      ← DARKSWORD core engine (V7)
-    ├── threat_ingest.py         ← Barricade engine
-    ├── governance_input.txt     ← Simply Cyber working file (gitignored)
-    ├── barricade_input.txt      ← Barricade working file (gitignored)
-    ├── failed_records.txt       ← Failed push log
-    ├── prompts/                 ← Analyst prompt library
-    ├── archive/                 ← Legacy scripts
-    ├── GRC-Playground/          ← Experimental work
-    ├── GovSCH/                  ← Governance scheduler
-    ├── .env                     ← API keys (gitignored)
+    ├── notion_logger_v7.py           ← DARKSWORD core engine (V7)
+    ├── threat_ingest.py              ← Barricade engine (legacy)
+    ├── run_darksword_auto.ps1        ← Task Scheduler: Simply Cyber daily
+    ├── run_darksword_otx.ps1         ← Task Scheduler: AlienVault OTX
+    ├── run_darksword_barricade.ps1   ← Task Scheduler: Barricade Cyber
+    ├── governance_input.txt          ← Working file (gitignored)
+    ├── barricade_last_ingested.txt   ← Barricade dedup state (gitignored)
+    ├── failed_records.txt            ← Failed push log
+    ├── prompts/                      ← Analyst prompt library
+    ├── archive/                      ← Legacy scripts
+    ├── GRC-Playground/               ← Experimental work
+    ├── GovSCH/                       ← Governance scheduler
+    ├── .env                          ← API keys (gitignored)
     ├── requirements.txt
     ├── README.md
-    └── script_walkthrough_.md   ← Full code walkthrough (V7.0)
-
-PHOENIX_LAB_INFRA (AdminOps)
-└── scripts/python/
-    └── ...                      ← Lab automation scripts
+    └── script_walkthrough_.md        ← Full code walkthrough
 ```
 
 ---
@@ -81,36 +77,38 @@ PHOENIX_LAB_INFRA (AdminOps)
 cpe   # launches via alias
 ```
 
-| Option | Description |
-|---|---|
-| `1. Autonomous Pipeline` | Show Notes → Claude → Notion (Simply Cyber via `cyberthreatbrief.simplycyber.io`) |
-| `2. Manual Pipeline` | `governance_input.txt` → Notion |
-| `3. Test Pipeline` | Mock data → Notion (`$0.00`, `--test` flag) |
-| `4. OTX Pipeline` | AlienVault OTX → Claude → Notion (requires `OTX_API_KEY`) |
+#### Interactive menu
 
-### Autonomous Pipeline Workflow (Simply Cyber)
+| Choice | Description | Source Label |
+|---|---|---|
+| `1. Autonomous Pipeline` | Show Notes → Claude → Notion (prompts for date) | Simply Cyber Daily Threat Brief |
+| `2. Manual Pipeline` | `governance_input.txt` → Notion | *(user-specified)* |
+| `3. Test Pipeline` | Mock data → Notion (`$0.00`, `--test` flag only) | — |
+| `4. OTX Pipeline` | AlienVault OTX → Claude → Notion | AlienVault OTX |
+| `5. RSS Feed Pipeline` | RSS auto-detect date → Show Notes → Claude → Notion | Simply Cyber Daily Threat Brief |
+| `6. Barricade Cyber` | YouTube URL → Transcript → Claude → Notion | Barricade Cyber |
+| `7. Simply Cyber YouTube` | YouTube URL → Transcript → Claude → Notion | Simply Cyber Daily Threat Brief |
 
-1. Run `cpe` → select **1. Autonomous Pipeline**
-2. Enter date (`YYYY-MM-DD`) or press Enter for today
-3. Script fetches show notes from `cyberthreatbrief.simplycyber.io`, sends to Claude, writes records
-4. Records push automatically to Notion with CMMC linking and learning plan mapping
+Choice 7 is the show notes fallback — same flow as Choice 6 but tagged as Simply Cyber. Use it when the show notes page hasn't published yet or has insufficient content.
 
-### Manual Pipeline Workflow (other YouTube sources)
+#### Non-interactive flags (Task Scheduler)
 
-1. Go to YouTube video → open transcript → toggle timestamps off → copy all text
-2. Paste transcript into Claude chat using `prompts/cpe_prompt_claude.txt`
-3. Claude generates `===INTEL_RECORD_START===` formatted records
-4. Copy records into `governance_input.txt`
-5. Run `cpe` → select **2. Manual Pipeline** → enter source URL
-6. Records push to Notion with CMMC linking and auto learning plan mapping
+| Flag | Pipeline | Log file |
+|---|---|---|
+| `--auto` | RSS date detect → show notes → Claude → Notion (with <500-word YouTube fallback) | `darksword_YYYY-MM-DD.log` |
+| `--auto-otx` | AlienVault OTX → Claude → Notion | `darksword_otx_YYYY-MM-DD.log` |
+| `--auto-barricade` | Barricade RSS → transcript → Claude → Notion (with restricted-video fallback + dedup) | `darksword_barricade_YYYY-MM-DD.log` |
 
-### Barricade Engine (`threat_ingest.py`)
+Flags are mutually exclusive. `--test` is also mutually exclusive with all auto flags.
 
-```bash
-python threat_ingest.py
-```
+#### Word count gate (`--auto`)
 
-Handles Barricade Cyber content ingestion into the STAR Strategy database.
+After `get_show_notes()` returns, the script counts words. If the result is below 500:
+1. Prints a warning with the actual word count
+2. Extracts the YouTube URL from the same RSS entry
+3. Falls back to `get_barricade_intel()` to fetch the YouTube transcript
+4. Continues the Claude/Notion pipeline with the transcript as content
+5. If no YouTube URL was in the RSS entry, or the transcript fetch fails, exits cleanly (code 0)
 
 ---
 
@@ -133,7 +131,7 @@ NOTION_TOKEN=secret_...
 DATABASE_ID=...                  # CPE Tracker
 CMMC_DATABASE_ID=...             # Master Frameworks
 ANTHROPIC_API_KEY=sk-ant-...
-OTX_API_KEY=...                  # AlienVault OTX (for Choice 4)
+OTX_API_KEY=...                  # AlienVault OTX (for Choice 4 / --auto-otx)
 
 # Learning Plan Weeks
 LEARNING_WEEK_1=...
@@ -173,16 +171,34 @@ Set the `cpe` alias in `~/.bashrc`:
 alias cpe='cd /c/Work/GRC-OCEG/darksword && /c/Work/GRC-OCEG/.venv/Scripts/python.exe notion_logger_v7.py'
 ```
 
+### Key dependency
+
+`notion-client` is pinned to `==2.2.1` in `requirements.txt`. The Notion SDK's async behavior changed in later versions in ways that break the synchronous pipeline. Do not upgrade without testing.
+
 ---
 
 ## Intelligence Sources
 
 | Source | Channel | Focus | Status |
 |---|---|---|---|
-| Simply Cyber | Show Notes | Daily tactical threat briefs | ✅ Live (Autonomous + Manual) |
-| AlienVault OTX | Threat Feed | IOC feeds, pulse intelligence | ✅ Live (OTX Pipeline) |
-| Barricade Cyber | YouTube | DFIR, MSP/enterprise ops | ✅ Live |
-| Cybernews | YouTube | Threat actor profiles, geopolitical | 📋 Planned |
+| Simply Cyber | Show Notes | Daily tactical threat briefs | ✅ Live (auto + interactive) |
+| AlienVault OTX | Threat Feed | IOC feeds, pulse intelligence | ✅ Live (auto + interactive) |
+| Barricade Cyber | YouTube | DFIR, MSP/enterprise ops | ✅ Live (auto + interactive) |
+| Cybernews | YouTube | Threat actor profiles, geopolitical | Planned |
+
+---
+
+## Task Scheduler
+
+Three Windows Task Scheduler tasks run `notion_logger_v7.py` non-interactively on a daily schedule:
+
+| Task | Script | Trigger |
+|---|---|---|
+| DARKSWORD Auto | `run_darksword_auto.ps1` | Weekdays 9 AM |
+| DARKSWORD OTX | `run_darksword_otx.ps1` | Daily |
+| DARKSWORD Barricade | `run_darksword_barricade.ps1` | Daily |
+
+Each PS1 wrapper sets `PYTHONIOENCODING=utf-8` and `$OutputEncoding` to prevent emoji corruption in log files, then tees stdout+stderr to a dated log file.
 
 ---
 
@@ -190,8 +206,7 @@ alias cpe='cd /c/Work/GRC-OCEG/darksword && /c/Work/GRC-OCEG/.venv/Scripts/pytho
 
 The script queries the Master Frameworks database at launch and builds an in-memory cache of all CMMC 2.0 controls. Currently loaded: **128 controls**.
 
-Notable controls added during development:
-- `SR.L2-3.15.2` — Supply Chain Risk Management: Notification of Supply Chain Compromise
+`normalize_cid()` strips whitespace and normalizes case before cache lookups. Unresolved IDs are tracked in `CMMC_MISSES` and printed in a post-run miss report so gaps can be investigated without interrupting the push loop.
 
 ---
 
@@ -240,7 +255,6 @@ Every intel record is automatically linked to relevant GRC learning plan weeks b
 - [x] `impacted_identity_provider` field mapping fixed
 - [x] Learning plan auto-detection from `control_domains` and `intel_category`
 - [x] Learning plan expanded from 3 weeks to 29 weeks
-- [x] Barricade engine (`threat_ingest.py`) active
 - [x] DARKSWORD v7 — `get_show_notes()` replaces YouTube scraping for Simply Cyber
 - [x] Autonomous Pipeline (Choice 1) live for Simply Cyber via show notes
 - [x] OTX Pipeline (Choice 4) — AlienVault threat feed integration with three-gate filter
@@ -248,18 +262,29 @@ Every intel record is automatically linked to relevant GRC learning plan weeks b
 - [x] `OTX_ANALYST_PROMPT` — `content_type`, `content_category`, `impacted_identity_provider` fixed
 - [x] CMMC cache retry loop (3 attempts, rate-limit resilient)
 - [x] `max_tokens` increased to 16000
-- [ ] Windows Task Scheduler automation
+- [x] RSS Feed Pipeline (Choice 5) — auto-detects episode date from Transistor RSS
+- [x] `--auto` flag — non-interactive Simply Cyber pipeline for Task Scheduler
+- [x] `--auto-otx` flag — non-interactive OTX pipeline for Task Scheduler
+- [x] `--auto-barricade` flag — non-interactive Barricade pipeline for Task Scheduler
+- [x] Windows Task Scheduler automation (3 tasks, 3 PS1 wrappers)
+- [x] Barricade Cyber pipeline (Choice 6) — YouTube transcript via `YouTubeTranscriptApi`
+- [x] `get_barricade_latest()` — RSS-driven with restricted-video fallback and deduplication
+- [x] Simply Cyber YouTube fallback (Choice 7) — transcript when show notes are thin
+- [x] Word count gate in `--auto` — auto-falls back to YouTube transcript if <500 words
+- [x] `normalize_cid()` + `CMMC_MISSES` post-run miss report
+- [x] `source_show` locked to canonical values in `ANALYST_PROMPT`
 - [ ] Cybernews threat actor database + relations
-- [ ] Claude-powered Barricade pipeline (replace hardcoded items)
 - [ ] Phoenix Lab VM environment (attack surface testing)
 
 ---
 
 ## Known Limitations
 
-**`get_transcript()` still blocked for Simply Cyber** — yt-dlp is blocked at the network/IP level for Simply Cyber specifically. This is no longer a pipeline limitation: V7's Choice 1 uses `get_show_notes()` to fetch from `cyberthreatbrief.simplycyber.io` directly, bypassing YouTube entirely. `get_transcript()` is retained for other sources (Barricade, Cybernews) that are not network-restricted.
+**`get_transcript()` still blocked for Simply Cyber** — yt-dlp is blocked at the network/IP level for Simply Cyber content. This is no longer a pipeline limitation: V7's Choice 1 uses `get_show_notes()`, and the `--auto` word count gate falls back to `get_barricade_intel()` (YouTubeTranscriptApi, not yt-dlp). `get_transcript()` is retained for reference but not called by any active pipeline.
 
 **`unknown` threat actor shows empty in Notion** — the script skips placeholder values (`none`, `unknown`, `empty`, `n/a`) to prevent noise in the database. This is intentional behavior.
+
+**Barricade RSS may not include a YouTube URL** — if the Transistor feed entry for a Simply Cyber episode has no `yt_videoid` and no YouTube href in `entry.links`, the `--auto` YouTube fallback cannot trigger. The pipeline exits cleanly with a log message.
 
 ---
 
