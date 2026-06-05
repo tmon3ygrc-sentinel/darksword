@@ -476,16 +476,13 @@ def get_show_notes(target_date: str = None) -> tuple:
     return clean_text, episode_url
 
 
-def get_rss_episode_date() -> str:
+def get_rss_episode_date() -> tuple[str, str | None]:
     """
-    Returns the publish date of the most recent Simply Cyber episode as YYYY-MM-DD.
+    Returns (date_str, youtube_url) for the most recent Simply Cyber episode.
 
-    Parses the Transistor RSS feed and extracts pubDate from the latest entry.
-    Used by Choice 5 to auto-detect today's episode date without requiring
-    manual input, then passes the date to get_show_notes() for content fetch.
-
-    Returns:
-        YYYY-MM-DD string from the latest entry's pubDate.
+    date_str is YYYY-MM-DD from the entry's pubDate. youtube_url is the full
+    YouTube watch URL if extractable from the feed entry (via yt_videoid or a
+    YouTube href in entry.links), otherwise None.
 
     Raises:
         RuntimeError: Feed unreachable, parse failure, or no entries found.
@@ -509,8 +506,21 @@ def get_rss_episode_date() -> str:
         raise RuntimeError("❌ No pubDate found in latest feed entry.")
 
     date_str = f"{parsed.tm_year:04d}-{parsed.tm_mon:02d}-{parsed.tm_mday:02d}"
-    print(f"✅ Latest episode: {title} → {date_str}")
-    return date_str
+
+    # Extract YouTube URL from feed entry
+    youtube_url = None
+    yt_id = latest.get("yt_videoid")
+    if yt_id:
+        youtube_url = f"https://www.youtube.com/watch?v={yt_id}"
+    else:
+        for link in latest.get("links", []):
+            href = link.get("href", "")
+            if "youtube.com" in href or "youtu.be" in href:
+                youtube_url = href
+                break
+
+    print(f"✅ Latest episode: {title} → {date_str}" + (f" | YouTube: {youtube_url}" if youtube_url else ""))
+    return date_str, youtube_url
 
 
 BARRICADE_LAST_FILE = SCRIPT_DIR / "barricade_last_ingested.txt"
@@ -1050,9 +1060,27 @@ def main():
     if AUTO_MODE:
         print("\n⚡ Auto-run: Choice 5 (RSS date detection → Show Notes → Notion)")
         try:
-            date_str     = get_rss_episode_date()
-            content, url = get_show_notes(date_str)
-            raw_output   = analyze_with_claude(content, url, date.today().isoformat())
+            date_str, youtube_url = get_rss_episode_date()
+            content, url          = get_show_notes(date_str)
+        except (RuntimeError, ValueError) as e:
+            print(f"❌ Auto pipeline failed: {e}")
+            sys.exit(1)
+
+        word_count = len(content.split())
+        if word_count < 500:
+            print(f"⚠️  Show notes too short ({word_count} words) — falling back to YouTube transcript.")
+            if not youtube_url:
+                print("❌ No YouTube URL found in RSS feed — cannot fall back. Exiting.")
+                sys.exit(0)
+            try:
+                content = get_barricade_intel(youtube_url)
+                url     = youtube_url
+            except (RuntimeError, ValueError) as e:
+                print(f"❌ YouTube transcript fallback also failed: {e} — exiting cleanly.")
+                sys.exit(0)
+
+        try:
+            raw_output = analyze_with_claude(content, url, date.today().isoformat())
             write_governance_file(raw_output)
         except (RuntimeError, ValueError) as e:
             print(f"❌ Auto pipeline failed: {e}")
@@ -1201,7 +1229,7 @@ def main():
                 print("❌ RSS auto-detect mode disabled in --test.")
                 continue
             try:
-                date_str        = get_rss_episode_date()
+                date_str, _yt   = get_rss_episode_date()
                 content, url    = get_show_notes(date_str)
                 raw_output      = analyze_with_claude(content, url, date.today().isoformat())
                 write_governance_file(raw_output)
