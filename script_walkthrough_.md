@@ -2,7 +2,7 @@
 **notion_logger_v7.py — Complete Reference**
 
 > This document explains every section of the DARKSWORD pipeline so you own the code, not just run it.
-> Last updated: V7.0 — current build `2a35fa4`
+> Last updated: V7.0 — current build `fe2fbe0`
 
 ---
 

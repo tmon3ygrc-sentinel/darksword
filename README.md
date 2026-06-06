@@ -6,11 +6,11 @@ A multi-source intelligence pipeline that ingests daily security content from sh
 
 Built as part of the **STAR Project** (Self-Transformation through Adversarial Rigor) — a hands-on vCISO development program. Manual mastery first, automation second.
 
-Current build: `2a35fa4`
+Current build: `fe2fbe0`
 
 ---
 
-## Mission
+## Why DARKSWORD
 
 The asymmetry is real.
 
