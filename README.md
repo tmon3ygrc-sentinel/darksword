@@ -6,7 +6,7 @@ A multi-source intelligence pipeline that ingests daily security content from sh
 
 Built as part of the **STAR Project** (Self-Transformation through Adversarial Rigor) — a hands-on vCISO development program. Manual mastery first, automation second.
 
-Current build: `d2030d1`
+Current build: `2a35fa4`
 
 ---
 
@@ -70,6 +70,7 @@ STAR_PROJECT (GRC-OCEG)
     ├── run_darksword_auto.ps1        ← Task Scheduler: Simply Cyber daily
     ├── run_darksword_otx.ps1         ← Task Scheduler: AlienVault OTX
     ├── run_darksword_barricade.ps1   ← Task Scheduler: Barricade Cyber
+    ├── gemini_ingest_tool.py         ← Standalone Gemini YouTube transcription tool
     ├── governance_input.txt          ← Working file (gitignored)
     ├── barricade_last_ingested.txt   ← Barricade dedup state (gitignored)
     ├── failed_records.txt            ← Failed push log
@@ -104,8 +105,11 @@ cpe   # launches via alias
 | `5. RSS Feed Pipeline` | RSS auto-detect date → Show Notes → Claude → Notion | Simply Cyber Daily Threat Brief |
 | `6. Barricade Cyber` | YouTube URL → Transcript → Claude → Notion | Barricade Cyber |
 | `7. Simply Cyber YouTube` | YouTube URL → Transcript → Claude → Notion | Simply Cyber Daily Threat Brief |
+| `8. Gemini YouTube Ingest` | YouTube URL → Gemini transcript → Claude → Notion | *(user-selected)* |
 
 Choice 7 is the show notes fallback — same flow as Choice 6 but tagged as Simply Cyber. Use it when the show notes page hasn't published yet or has insufficient content.
+
+Choice 8 uses the Gemini API (`gemini-2.0-flash`) to transcribe YouTube videos that `YouTubeTranscriptApi` cannot access — restricted, age-gated, or long-form content. Prompts for a canonical source label. Requires `GEMINI_API_KEY` in `.env`. `gemini_ingest_tool.py` is the equivalent standalone script.
 
 #### Non-interactive flags (Task Scheduler)
 
@@ -148,6 +152,7 @@ DATABASE_ID=...                  # CPE Tracker
 CMMC_DATABASE_ID=...             # Master Frameworks
 ANTHROPIC_API_KEY=sk-ant-...
 OTX_API_KEY=...                  # AlienVault OTX (for Choice 4 / --auto-otx)
+GEMINI_API_KEY=...               # Gemini API (for Choice 8 / gemini_ingest_tool.py)
 
 # Learning Plan Weeks
 LEARNING_WEEK_1=...
@@ -187,9 +192,11 @@ Set the `cpe` alias in `~/.bashrc`:
 alias cpe='cd /c/Work/GRC-OCEG/darksword && /c/Work/GRC-OCEG/.venv/Scripts/python.exe notion_logger_v7.py'
 ```
 
-### Key dependency
+### Key dependencies
 
 `notion-client` is pinned to `==2.2.1` in `requirements.txt`. The Notion SDK's async behavior changed in later versions in ways that break the synchronous pipeline. Do not upgrade without testing.
+
+`google-genai` is required for Choice 8 and `gemini_ingest_tool.py`. Install with `pip install google-genai`. Uses `gemini-2.0-flash` via `client.models.generate_content()` with `types.Part.from_uri()` for YouTube URL passing.
 
 ---
 
@@ -289,6 +296,8 @@ Every intel record is automatically linked to relevant GRC learning plan weeks b
 - [x] Word count gate in `--auto` — auto-falls back to YouTube transcript if <500 words
 - [x] `normalize_cid()` + `CMMC_MISSES` post-run miss report
 - [x] `source_show` locked to canonical values in `ANALYST_PROMPT`
+- [x] Gemini YouTube Ingest (Choice 8) — `gemini-2.0-flash` transcription for restricted/long-form video
+- [x] `gemini_ingest_tool.py` — standalone Gemini transcription script
 - [ ] Cybernews threat actor database + relations
 - [ ] Phoenix Lab VM environment (attack surface testing)
 

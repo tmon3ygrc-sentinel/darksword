@@ -2,7 +2,7 @@
 **notion_logger_v7.py — Complete Reference**
 
 > This document explains every section of the DARKSWORD pipeline so you own the code, not just run it.
-> Last updated: V7.0 — current build `d2030d1`
+> Last updated: V7.0 — current build `2a35fa4`
 
 ---
 
@@ -457,6 +457,15 @@ Returns `(video_id, title)` for the most recent playable Barricade Cyber video, 
 ---
 
 ```python
+def get_gemini_transcript(url: str) -> str:
+```
+Transcribes a YouTube video via the Gemini API (`gemini-2.0-flash`) using the `google-genai` SDK. Accepts YouTube URLs natively through `types.Part.from_uri(file_uri=url, mime_type="video/*")` — no audio download, no yt-dlp, no Whisper. Use for restricted, age-gated, or long-form videos that `YouTubeTranscriptApi` cannot access. Requires `GEMINI_API_KEY` in `.env`; raises `RuntimeError` cleanly if missing.
+
+`gemini_ingest_tool.py` is the standalone equivalent — runs outside of `notion_logger_v7.py`, writes the raw transcript to `governance_input.txt`, and prints a word count. Useful for inspecting the transcript before committing to the full Claude/Notion pipeline.
+
+---
+
+```python
 def get_transcript(url: str) -> str:
 ```
 Downloads YouTube audio via yt-dlp and transcribes with OpenAI Whisper. Retained for reference. **Not called by any active pipeline** — blocked at network level for Simply Cyber, and replaced by `get_barricade_intel()` for all other sources.
@@ -750,6 +759,7 @@ python notion_logger_v7.py --auto-barricade
 5. RSS Feed Pipeline    (Barricade Cyber → Claude → Notion)
 6. Barricade Cyber      (YouTube Transcript → Claude → Notion)
 7. Simply Cyber YouTube (YouTube Transcript → Claude → Notion)  <- show notes fallback
+8. Gemini YouTube Ingest (restricted/long-form → Claude → Notion)
 0. Exit
 ```
 
@@ -779,6 +789,14 @@ Task Scheduler → `run_darksword_barricade.ps1` → `--auto-barricade` (daily),
 1. `cpe` → **6. Barricade Cyber** → paste YouTube URL
 
 The `--auto-barricade` flag checks the RSS feed, skips restricted videos, deduplicates against `barricade_last_ingested.txt`, and exits cleanly if nothing is new.
+
+### Gemini workflow (restricted / long-form video)
+
+1. `cpe` → **8. Gemini YouTube Ingest** → paste YouTube URL
+2. Select source label from the canonical list (or type manually)
+3. Script sends URL to Gemini 2.0 Flash → transcript → Claude → Notion
+
+Or run standalone: `python gemini_ingest_tool.py <youtube_url>` — writes raw transcript to `governance_input.txt` for review.
 
 ### Manual pipeline workflow (any source)
 
@@ -927,3 +945,6 @@ Same flow as Choice 6 but pushes under source label `"Simply Cyber Daily Threat 
 
 ### `notion-client` Pin
 Pinned to `==2.2.1` in `requirements.txt`. SDK async behavior changed in later versions.
+
+### Gemini YouTube Ingest (Choice 8)
+`get_gemini_transcript(url)` uses the `google-genai` SDK (`google.genai.Client`) with `gemini-2.0-flash`. YouTube URL is passed as `types.Part.from_uri(file_uri=url, mime_type="video/*")` in the `contents` list alongside the transcription prompt. Choice 8 prompts for the URL and source label (canonical list + manual option), then pipes the transcript through `analyze_with_claude()` and `push_all()`. `gemini_ingest_tool.py` is the standalone equivalent writing raw transcript to `governance_input.txt`.
