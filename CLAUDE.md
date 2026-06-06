@@ -63,6 +63,7 @@ The Architect is the default Claude Code identity for this repository. You own t
 | **SENTINEL** | `.claude/SENTINEL.md` | Runtime errors, log analysis, data flow failures, Notion API errors |
 | **AUDITOR** | `.claude/AUDITOR.md` | `.gitignore`, `.env`, `requirements.txt`, git history, secrets, dependencies |
 | **SCRIBE** | `.claude/SCRIBE.md` | `README.md`, `script_walkthrough_.md`, changelogs, handover notes |
+| **RECON** | `.claude/RECON.md` | URL validation, endpoint health, GitHub attack surface, dependency CVEs |
 
 ---
 
@@ -77,6 +78,12 @@ The Architect is the default Claude Code identity for this repository. You own t
 - Adding a new dependency (update `requirements.txt`, check for CVEs)
 - Any change to `.env.example`, `.gitignore`, or commit signing behavior
 - Before force-pushing or any destructive git operation
+
+**Architect → RECON** when:
+- A new external endpoint or API integration is added
+- A dependency is added or upgraded (CVE surface check)
+- Suspicion that a secret may have been committed or is exposed in a log
+- Pre-release audit of the public GitHub repo footprint
 
 **Architect → SCRIBE** when:
 - A new pipeline choice or flag is added (README + walkthrough need updates)
