@@ -38,32 +38,30 @@ def scrub(text: str) -> str:
 
 def gemini_transcribe(url: str) -> str:
     """
-    Sends a YouTube URL to Gemini 1.5 Flash and returns a clean transcript.
+    Sends a YouTube URL to Gemini 2.0 Flash and returns a clean transcript.
     Raises RuntimeError on API failure or missing key.
     """
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 
     if not GEMINI_API_KEY:
         raise RuntimeError("❌ GEMINI_API_KEY not set in .env")
 
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
     print(f"📡 Sending to Gemini for transcription: {url}")
 
-    response = model.generate_content([
-        {
-            "file_data": {
-                "file_uri": url,
-                "mime_type": "video/*"
-            }
-        },
-        (
-            "Provide a complete, verbatim transcription of all spoken content in this video. "
-            "Output only the spoken words as plain text, preserving natural paragraph breaks. "
-            "Do not include timestamps, speaker labels, or any commentary."
-        )
-    ])
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=[
+            types.Part.from_uri(file_uri=url, mime_type="video/*"),
+            (
+                "Provide a complete, verbatim transcription of all spoken content in this video. "
+                "Output only the spoken words as plain text, preserving natural paragraph breaks. "
+                "Do not include timestamps, speaker labels, or any commentary."
+            ),
+        ]
+    )
 
     raw_text = response.text
     clean_text = scrub(raw_text)

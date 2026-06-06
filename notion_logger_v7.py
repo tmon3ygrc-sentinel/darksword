@@ -817,35 +817,33 @@ def get_barricade_intel(url: str) -> str:
 
 def get_gemini_transcript(url: str) -> str:
     """
-    Transcribes a YouTube video using the Gemini API (gemini-1.5-flash).
+    Transcribes a YouTube video using the Gemini API (gemini-2.0-flash).
     Accepts YouTube URLs natively — no audio download, no yt-dlp, no Whisper.
     Use for restricted or long-form videos that YouTubeTranscriptApi cannot access.
     Requires GEMINI_API_KEY in .env.
     """
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
         raise RuntimeError("❌ GEMINI_API_KEY not set in .env")
 
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    client = genai.Client(api_key=gemini_key)
 
     print(f"📡 Sending to Gemini for transcription: {url}")
 
-    response = model.generate_content([
-        {
-            "file_data": {
-                "file_uri": url,
-                "mime_type": "video/*"
-            }
-        },
-        (
-            "Provide a complete, verbatim transcription of all spoken content in this video. "
-            "Output only the spoken words as plain text, preserving natural paragraph breaks. "
-            "Do not include timestamps, speaker labels, or any commentary."
-        )
-    ])
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=[
+            types.Part.from_uri(file_uri=url, mime_type="video/*"),
+            (
+                "Provide a complete, verbatim transcription of all spoken content in this video. "
+                "Output only the spoken words as plain text, preserving natural paragraph breaks. "
+                "Do not include timestamps, speaker labels, or any commentary."
+            ),
+        ]
+    )
 
     raw_text = response.text
     clean_text = scrub(raw_text)
