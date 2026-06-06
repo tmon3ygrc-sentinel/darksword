@@ -523,6 +523,30 @@ def get_rss_episode_date() -> tuple[str, str | None]:
     return date_str, youtube_url
 
 
+def scrape_episode_youtube_url(episode_url: str) -> str | None:
+    """
+    Scrapes a cyberthreatbrief.simplycyber.io episode page for an embedded
+    YouTube link (e.g. the 'Watch on YouTube →' anchor).
+
+    Called as a fallback when the RSS feed entry carries no yt_videoid or
+    YouTube href. Returns the first youtube.com/watch or youtu.be URL found
+    on the page, or None if not present.
+    """
+    try:
+        resp = requests.get(episode_url, timeout=15)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"⚠️  Could not fetch episode page for YouTube scrape: {e}")
+        return None
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "youtube.com/watch" in href or "youtu.be/" in href:
+            return href
+    return None
+
+
 BARRICADE_LAST_FILE = SCRIPT_DIR / "barricade_last_ingested.txt"
 
 
@@ -1106,7 +1130,10 @@ def main():
         if word_count < 500:
             print(f"⚠️  Show notes too short ({word_count} words) — falling back to YouTube transcript.")
             if not youtube_url:
-                print("❌ No YouTube URL found in RSS feed — cannot fall back. Exiting.")
+                print("⚠️  No YouTube URL in RSS feed — scraping episode page...")
+                youtube_url = scrape_episode_youtube_url(url)
+            if not youtube_url:
+                print("❌ No YouTube URL found in RSS feed or episode page — cannot fall back. Exiting.")
                 sys.exit(0)
             try:
                 content = get_barricade_intel(youtube_url)
