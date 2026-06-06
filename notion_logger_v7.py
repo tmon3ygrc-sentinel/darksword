@@ -814,6 +814,44 @@ def get_barricade_intel(url: str) -> str:
     print(f"✅ Transcript ready: {len(clean_text.split()):,} words")
     return clean_text
 
+
+def get_gemini_transcript(url: str) -> str:
+    """
+    Transcribes a YouTube video using the Gemini API (gemini-1.5-flash).
+    Accepts YouTube URLs natively — no audio download, no yt-dlp, no Whisper.
+    Use for restricted or long-form videos that YouTubeTranscriptApi cannot access.
+    Requires GEMINI_API_KEY in .env.
+    """
+    import google.generativeai as genai
+
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_key:
+        raise RuntimeError("❌ GEMINI_API_KEY not set in .env")
+
+    genai.configure(api_key=gemini_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
+    print(f"📡 Sending to Gemini for transcription: {url}")
+
+    response = model.generate_content([
+        {
+            "file_data": {
+                "file_uri": url,
+                "mime_type": "video/*"
+            }
+        },
+        (
+            "Provide a complete, verbatim transcription of all spoken content in this video. "
+            "Output only the spoken words as plain text, preserving natural paragraph breaks. "
+            "Do not include timestamps, speaker labels, or any commentary."
+        )
+    ])
+
+    raw_text = response.text
+    clean_text = scrub(raw_text)
+    print(f"✅ Gemini transcript ready: {len(clean_text.split()):,} words")
+    return clean_text
+
 # ===================================================================
 # 7. NOTION FUNCTIONS
 # ===================================================================
@@ -1153,6 +1191,7 @@ def main():
         print("5. RSS Feed Pipeline    (Barricade Cyber → Claude → Notion)")
         print("6. Barricade Cyber      (YouTube Transcript → Claude → Notion)")
         print("7. Simply Cyber YouTube (YouTube Transcript → Claude → Notion)  ← show notes fallback")
+        print("8. Gemini YouTube Ingest (restricted/long-form → Claude → Notion)")
         print("0. Exit")
 
         choice = input("\nSelection: ").strip()
@@ -1271,6 +1310,36 @@ def main():
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
             push_all(records, "Simply Cyber Daily Threat Brief", url)
+
+        elif choice == "8":
+            if TEST_MODE:
+                print("❌ Gemini ingest disabled in --test.")
+                continue
+            url = input("YouTube URL: ").strip()
+            print("\nSource label:")
+            print("  1. Simply Cyber Daily Threat Brief")
+            print("  2. Barricade Cyber")
+            print("  3. AlienVault OTX")
+            print("  4. Other (type manually)")
+            src_choice = input("Selection: ").strip()
+            if src_choice == "1":
+                source_label = "Simply Cyber Daily Threat Brief"
+            elif src_choice == "2":
+                source_label = "Barricade Cyber"
+            elif src_choice == "3":
+                source_label = "AlienVault OTX"
+            else:
+                source_label = input("Source label: ").strip() or "Unknown"
+            try:
+                content = get_gemini_transcript(url)
+                raw_output = analyze_with_claude(content, url, date.today().isoformat())
+                write_governance_file(raw_output)
+            except (RuntimeError, ValueError) as e:
+                print(f"❌ Pipeline failed: {e}")
+                continue
+            records = parse_records(SCRIPT_DIR / "governance_input.txt")
+            print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
+            push_all(records, source_label, url)
 
     # ── Post-run audit ──────────────────────────────────────────
     if CMMC_MISSES:
