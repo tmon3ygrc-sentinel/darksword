@@ -45,3 +45,4 @@ governance_input.txt
 client_secrets.json
 token.pickle
 barricade_last_ingested.txt
+!requirements.txt
