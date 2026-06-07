@@ -72,7 +72,7 @@ Check: `pip audit` (install with `pip install pip-audit`) or query OSV.dev.
 
 - `run_darksword_auto.ps1` — runs daily, writes to `darksword_YYYY-MM-DD.log`; log path is local-only (`*.log` gitignored). Verify logs don't capture API responses or keys.
 - Task Scheduler task runs under user account — confirm no elevated privileges
-- Venv at `C:\Work\GRC-OCEG\.venv` — shared across projects; a compromised package affects all
+- Venv at `C:\Work\GRC\.venv` — shared across projects; a compromised package affects all
 
 ---
 

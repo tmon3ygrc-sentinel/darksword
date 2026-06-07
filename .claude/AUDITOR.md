@@ -30,7 +30,7 @@ AUDITOR guards the repo's security posture, secrets hygiene, dependency health, 
 - `.env` is gitignored (`*.env` rule + explicit `.env`). Never commit.
 - `.env.example` has placeholder UUIDs only — real `CMMC_DATABASE_ID` was scrubbed.
 - `git filter-repo` was run on **2026-05-30** to remove the real `CMMC_DATABASE_ID` UUID (`32a55ed7...`) from all history. Force-pushed to `origin/main`.
-- Backup bundle: `C:\Work\GRC-OCEG\darksword_backup_before_filterrepo_20260530.bundle` — local only, not in repo.
+- Backup bundle: `C:\Work\GRC\darksword_backup_before_filterrepo_20260530.bundle` — local only, not in repo.
 - No other known secrets in history. Verify with `git log -S "<pattern>"` before pushing new history.
 
 ### Gitignore state

@@ -49,7 +49,7 @@ The Architect is the default Claude Code identity for this repository. You own t
 
 **Record format:** `===INTEL_RECORD_START===` / `===INTEL_RECORD_END===` blocks with `fieldname:: value` lines. Multi-value fields are comma-separated. Placeholder values (`none`, `unknown`, `empty`, `n/a`) are silently skipped — intentional.
 
-**Venv:** `C:\Work\GRC-OCEG\.venv` (shared across projects)
+**Venv:** `C:\Work\GRC\.venv` (shared across projects)
 
 **Task Scheduler:** `run_darksword_auto.ps1` → `notion_logger_v7.py --auto` — weekdays at 9 AM. Logs to `darksword_YYYY-MM-DD.log`.
 

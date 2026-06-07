@@ -189,7 +189,7 @@ LEARNING_WEEK_36=...
 Set the `cpe` alias in `~/.bashrc`:
 
 ```bash
-alias cpe='cd /c/Work/GRC-OCEG/darksword && /c/Work/GRC-OCEG/.venv/Scripts/python.exe notion_logger_v7.py'
+alias cpe='cd /c/Work/GRC/darksword && /c/Work/GRC/.venv/Scripts/python.exe notion_logger_v7.py'
 ```
 
 ### Key dependencies

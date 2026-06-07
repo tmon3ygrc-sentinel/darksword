@@ -2,8 +2,8 @@
 # Invoked by Windows Task Scheduler to run the AlienVault OTX pipeline.
 # Logs all output (stdout + stderr) to a dated file in the darksword folder.
 
-$ScriptDir = "C:\Work\GRC-OCEG\darksword"
-$Python    = "C:\Work\GRC-OCEG\.venv\Scripts\python.exe"
+$ScriptDir = "C:\Work\GRC\darksword"
+$Python    = "C:\Work\GRC\.venv\Scripts\python.exe"
 $LogFile   = Join-Path $ScriptDir "darksword_otx_$(Get-Date -Format 'yyyy-MM-dd').log"
 
 function Write-Log ($msg) {
