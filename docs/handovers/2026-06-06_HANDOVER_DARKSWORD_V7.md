@@ -4,7 +4,7 @@
 **Engine:** `notion_logger_v7.py`  
 **Handover Date:** 2026-06-06  
 **Supersedes:** `2026-05-25_HANDOVER_GRC_OCEG_Logging.md` (V6 — retired)  
-**Build ref:** `fe2fbe0` (Choice 8 / Gemini ingest)  
+**Build ref:** `0f5f96c`  
 **Status:** Production — all 8 choices operational
 
 ---
