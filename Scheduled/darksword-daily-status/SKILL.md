@@ -11,7 +11,7 @@ Read today's DARKSWORD pipeline log file and produce a concise status report cov
 ## Steps
 
 1. Determine today's date (use bash: `date +%Y-%m-%d`).
-2. Read the log file at: `C:\Work\GRC-OCEG\darksword\darksword_YYYY-MM-DD.log` where YYYY-MM-DD is today's date. Use the Read tool or bash (`cat /sessions/*/mnt/darksword/darksword_$(date +%Y-%m-%d).log`).
+2. Read the log file at: `C:\Work\GRC\darksword\darksword_YYYY-MM-DD.log` where YYYY-MM-DD is today's date. Use the Read tool or bash (`cat /sessions/*/mnt/darksword/darksword_$(date +%Y-%m-%d).log`).
 3. If the log file does not exist, report: "No log file found for today — pipeline may not have run."
 4. Parse the log and produce a report with these sections:
 
@@ -38,4 +38,4 @@ Plain prose with the four sections above. Keep it concise — this is a daily op
 ## Constraints
 - Never modify any files.
 - Log file path uses Windows-style paths; in bash use the mount path: `/sessions/*/mnt/darksword/darksword_$(date +%Y-%m-%d).log`
-- If `failed_records.txt` at `C:\Work\GRC-OCEG\darksword\failed_records.txt` has entries matching today's date, include them in the Failures section.
+- If `failed_records.txt` at `C:\Work\GRC\darksword\failed_records.txt` has entries matching today's date, include them in the Failures section.
