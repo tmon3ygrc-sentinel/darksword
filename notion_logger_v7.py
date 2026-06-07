@@ -47,13 +47,28 @@ SCRIPT_DIR = Path(__file__).parent.absolute()
 load_dotenv(dotenv_path=SCRIPT_DIR / ".env")
 
 # Run with: python notion_logger_v7.py --test
-# Run with: python notion_logger_v7.py --auto           (non-interactive, for Task Scheduler)
-# Run with: python notion_logger_v7.py --auto-otx       (non-interactive OTX pipeline only)
-# Run with: python notion_logger_v7.py --auto-barricade (non-interactive Barricade Cyber pipeline)
+# Run with: python notion_logger_v7.py --auto                          (non-interactive, for Task Scheduler)
+# Run with: python notion_logger_v7.py --auto-otx                     (non-interactive OTX pipeline only)
+# Run with: python notion_logger_v7.py --auto-otx --lookback-hours 48 (backfill missed runs, max 72)
+# Run with: python notion_logger_v7.py --auto-barricade               (non-interactive Barricade Cyber pipeline)
 TEST_MODE          = "--test"           in sys.argv
 AUTO_MODE          = "--auto"           in sys.argv
 AUTO_OTX_MODE      = "--auto-otx"      in sys.argv
 AUTO_BARRICADE_MODE = "--auto-barricade" in sys.argv
+
+def _parse_lookback_hours() -> int:
+    for i, arg in enumerate(sys.argv):
+        if arg == "--lookback-hours" and i + 1 < len(sys.argv):
+            try:
+                val = int(sys.argv[i + 1])
+            except ValueError:
+                raise ValueError(f"❌ --lookback-hours must be an integer, got: {sys.argv[i + 1]}")
+            if val < 1 or val > 72:
+                raise ValueError(f"❌ --lookback-hours must be between 1 and 72, got: {val}")
+            return val
+    return 24
+
+LOOKBACK_HOURS = _parse_lookback_hours()
 
 if TEST_MODE and AUTO_MODE:
     raise ValueError("❌ --test and --auto are mutually exclusive.")
@@ -908,15 +923,15 @@ def load_cmmc_cache(retries: int = 3, delay: int = 15):
             print(f"✅ CMMC cache loaded: {len(CMMC_CACHE)} controls")
             return  # Success — exit the retry loop
         except Exception as e:
-            if "rate limited" in str(e).lower():
-                if attempt < retries:
-                    print(f"⏳ Rate limited — waiting {delay}s before retry...")
-                    time.sleep(delay)
-                else:
-                    print(f"❌ CMMC cache failed after {retries} attempts: {e}")
+            err_str = str(e).lower()
+            if "unauthorized" in err_str or "401" in err_str or "invalid_token" in err_str:
+                print(f"❌ CMMC cache: credential error — {e}")
+                return
+            if attempt < retries:
+                print(f"⏳ CMMC cache error (attempt {attempt}/{retries}) — retrying in {delay}s: {e}")
+                time.sleep(delay)
             else:
-                print(f"❌ CMMC cache failed: {e}")
-                return  # Non-rate-limit error — don't retry
+                print(f"❌ CMMC cache failed after {retries} attempts: {e}")
 
 
 def update_compliance_status(control_ids: List[str], log_page_url: str):
@@ -1160,12 +1175,12 @@ def main():
             print("❌ OTX_API_KEY not set in .env")
             sys.exit(1)
         try:
-            pulses = get_otx_pulses(otx_key)
+            pulses = get_otx_pulses(otx_key, LOOKBACK_HOURS)
         except RuntimeError as e:
             print(f"❌ OTX fetch failed: {e}")
             sys.exit(1)
         if not pulses:
-            print("✅ No relevant pulses found in last 24hrs — nothing to push.")
+            print(f"✅ No relevant pulses found in last {LOOKBACK_HOURS}hrs — nothing to push.")
             return
         print(f"\n📋 Sending {len(pulses)} pulse(s) to Claude...")
         all_records = []
@@ -1266,12 +1281,12 @@ def main():
                 print("❌ OTX_API_KEY not set in .env")
                 continue
             try:
-                pulses = get_otx_pulses(otx_key)
+                pulses = get_otx_pulses(otx_key, LOOKBACK_HOURS)
             except RuntimeError as e:
                 print(e)
                 continue
             if not pulses:
-                print("✅ No relevant pulses found in last 24hrs.")
+                print(f"✅ No relevant pulses found in last {LOOKBACK_HOURS}hrs.")
                 continue
             print(f"\n📋 Sending {len(pulses)} pulse(s) to Claude...")
             all_records = []

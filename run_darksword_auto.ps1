@@ -12,6 +12,18 @@ function Write-Log ($msg) {
     Write-Host $line
 }
 
+# Pre-flight checks — run before Write-Log can be used
+if (-not (Test-Path $ScriptDir)) {
+    $msg = "[$(Get-Date -Format 'HH:mm:ss')] FATAL: Script directory not found: $ScriptDir"
+    Write-Host $msg
+    $msg | Out-File -FilePath "$env:TEMP\darksword_preflight_error.log" -Append -Encoding utf8NoBOM
+    exit 1
+}
+if (-not (Test-Path $Python)) {
+    Write-Log "FATAL: Python executable not found: $Python"
+    exit 1
+}
+
 Write-Log "=== DARKSWORD auto-run starting ==="
 Set-Location $ScriptDir
 
