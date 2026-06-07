@@ -1166,6 +1166,12 @@ def main():
         records = parse_records(SCRIPT_DIR / "governance_input.txt")
         print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
         push_all(records, "Simply Cyber Daily Threat Brief", url)
+        if not records and word_count >= 500:
+            print(
+                f"\n⚠️  WARNING: 0 records pushed despite {word_count}-word show notes. "
+                "Claude ran but the parser found no valid INTEL_RECORD blocks. "
+                "Check governance_input.txt and review Claude output for formatting issues."
+            )
         return
 
     if AUTO_OTX_MODE:
@@ -1256,13 +1262,21 @@ def main():
             push_all(records, "Simply Cyber Daily Threat Brief", url)
 
         elif choice == "2":
-            url = input("Source URL: ").strip()
+            while True:
+                url = input("Source URL: ").strip()
+                if url:
+                    break
+                print("⚠️  URL cannot be empty — records will have no source attribution. Enter a URL.")
             input("Save AI output to governance_input.txt then press ENTER...")
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             push_all(records, "Daily Threat Brief", url)
 
         elif choice == "3" and TEST_MODE:
-            url = input("Source URL (for metadata): ").strip()
+            while True:
+                url = input("Source URL (for metadata): ").strip()
+                if url:
+                    break
+                print("⚠️  URL cannot be empty — records will have no source attribution. Enter a URL.")
             try:
                 raw_output = load_mock_data()
             except FileNotFoundError as e:
