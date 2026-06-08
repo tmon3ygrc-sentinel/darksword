@@ -101,6 +101,9 @@ The Architect is the default Claude Code identity for this repository. You own t
 **Simply Cyber Monday streams — thin show notes when Gerald Auger is traveling:**
 When Gerald Auger is away from his home studio, Monday episode show notes are frequently too thin (~230 words) to produce clean records via Choice 1 (Autonomous) or the `--auto` scheduler. Standard fallback is Choice 2 (Manual Pipeline): use Librarian to generate records from the episode content, paste output into `governance_input.txt`, then run Choice 2 to push. Affected episodes to date: ep1145, ep1147, ep1148.
 
+**IA.L2-3.5.1 — manually backfilled 2026-06-08:**
+Control was missing from Master Frameworks (only the L1 variant `IA.L1-3.5.1` was present). Added via one-off script. Practice Title: "Use multifactor authentication for local and network access to privileged and non-privileged accounts." NIST 800-171 Ref: 3.5.3. `load_cmmc_cache()` now loads 129 controls at startup.
+
 ---
 
 ## Key Files
