@@ -908,10 +908,10 @@ def load_cmmc_cache(retries: int = 3, delay: int = 15):
             has_more = True
             cursor   = None
             while has_more:
-                kwargs = {"page_size": 100}
+                kwargs = {"database_id": CMMC_DB_ID, "page_size": 100}
                 if cursor:
                     kwargs["start_cursor"] = cursor
-                res = notion.data_sources.query(CMMC_DB_ID, **kwargs)
+                res = notion.databases.query(**kwargs)
                 for page in res.get("results", []):
                     title_props = page["properties"].get("Name", {}).get("title", [])
                     if title_props:
