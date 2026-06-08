@@ -96,6 +96,13 @@ The Architect is the default Claude Code identity for this repository. You own t
 
 ---
 
+## Known Operational Patterns
+
+**Simply Cyber Monday streams — thin show notes when Gerald Auger is traveling:**
+When Gerald Auger is away from his home studio, Monday episode show notes are frequently too thin (~230 words) to produce clean records via Choice 1 (Autonomous) or the `--auto` scheduler. Standard fallback is Choice 2 (Manual Pipeline): use Librarian to generate records from the episode content, paste output into `governance_input.txt`, then run Choice 2 to push. Affected episodes to date: ep1145, ep1147, ep1148.
+
+---
+
 ## Key Files
 
 | File | Role |
