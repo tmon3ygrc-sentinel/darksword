@@ -1,4 +1,4 @@
-notion-client>=2.2.1
+notion-client>=3.0.0
 python-dotenv>=1.0.1
 feedparser>=6.0.8
 google-genai>=2.8.0
