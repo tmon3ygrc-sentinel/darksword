@@ -107,6 +107,9 @@ Control was missing from Master Frameworks (only the L1 variant `IA.L1-3.5.1` wa
 **`TranscriptsDisabled` added to `get_barricade_intel()` catch block — 2026-06-11 (commit 3d19dc9):**
 Previously, videos with captions disabled (common on thin Monday episodes) raised an unhandled `TranscriptsDisabled` exception → exit code 1 crash. Now caught alongside `VideoUnplayable` and re-raised as a clean `RuntimeError` → exit code 0.
 
+**Vetting note (ep1151, 2026-06-11): Verify entity *relationships*, not just entity existence.**
+Real proper nouns can be welded into false linkages — in ep1151, the ConsentFix OAuth technique (real) was incorrectly fused with the CalPhishing .ics delivery vector (real) into a single false relationship. Both entities were legitimate; the link between them was fabricated. AUDITOR verification against primary sources caught it; generation-layer self-verification is not a control.
+
 ---
 
 ## Key Files
