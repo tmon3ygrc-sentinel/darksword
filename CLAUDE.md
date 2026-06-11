@@ -104,6 +104,9 @@ When Gerald Auger is away from his home studio, Monday episode show notes are fr
 **IA.L2-3.5.1 — manually backfilled 2026-06-08:**
 Control was missing from Master Frameworks (only the L1 variant `IA.L1-3.5.1` was present). Added via one-off script. Practice Title: "Use multifactor authentication for local and network access to privileged and non-privileged accounts." NIST 800-171 Ref: 3.5.3. `load_cmmc_cache()` now loads 129 controls at startup.
 
+**`TranscriptsDisabled` added to `get_barricade_intel()` catch block — 2026-06-11 (commit 3d19dc9):**
+Previously, videos with captions disabled (common on thin Monday episodes) raised an unhandled `TranscriptsDisabled` exception → exit code 1 crash. Now caught alongside `VideoUnplayable` and re-raised as a clean `RuntimeError` → exit code 0.
+
 ---
 
 ## Key Files
