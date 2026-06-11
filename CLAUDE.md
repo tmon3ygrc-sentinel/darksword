@@ -19,7 +19,7 @@ The Architect is the default Claude Code identity for this repository. You own t
 
 ---
 
-## System State (as of 2026-06-06)
+## System State (as of 2026-06-11)
 
 **Active engine:** `notion_logger_v7.py`
 
@@ -51,7 +51,7 @@ The Architect is the default Claude Code identity for this repository. You own t
 
 **Venv:** `C:\Work\GRC\.venv` (shared across projects)
 
-**Task Scheduler:** `run_darksword_auto.ps1` → `notion_logger_v7.py --auto` — weekdays at 9 AM. Logs to `darksword_YYYY-MM-DD.log`.
+**Task Scheduler:** `run_darksword_auto.ps1` → `notion_logger_v7.py --auto` — weekdays at noon. Logs to `darksword_YYYY-MM-DD.log`.
 
 ---
 
@@ -102,13 +102,42 @@ The Architect is the default Claude Code identity for this repository. You own t
 When Gerald Auger is away from his home studio, Monday episode show notes are frequently too thin (~230 words) to produce clean records via Choice 1 (Autonomous) or the `--auto` scheduler. Standard fallback is Choice 2 (Manual Pipeline): use Librarian to generate records from the episode content, paste output into `governance_input.txt`, then run Choice 2 to push. Affected episodes to date: ep1145, ep1147, ep1148.
 
 **IA.L2-3.5.1 — manually backfilled 2026-06-08:**
-Control was missing from Master Frameworks (only the L1 variant `IA.L1-3.5.1` was present). Added via one-off script. Practice Title: "Use multifactor authentication for local and network access to privileged and non-privileged accounts." NIST 800-171 Ref: 3.5.3. `load_cmmc_cache()` now loads 129 controls at startup.
+Control was missing from Master Frameworks (only the L1 variant `IA.L1-3.5.1` was present). Added via one-off script. Practice Title: "Use multifactor authentication for local and network access to privileged and non-privileged accounts." NIST 800-171 Ref: 3.5.3. `load_cmmc_cache()` now loads 136 controls at startup (verified 2026-06-11).
 
 **`TranscriptsDisabled` added to `get_barricade_intel()` catch block — 2026-06-11 (commit 3d19dc9):**
 Previously, videos with captions disabled (common on thin Monday episodes) raised an unhandled `TranscriptsDisabled` exception → exit code 1 crash. Now caught alongside `VideoUnplayable` and re-raised as a clean `RuntimeError` → exit code 0.
 
 **Vetting note (ep1151, 2026-06-11): Verify entity *relationships*, not just entity existence.**
 Real proper nouns can be welded into false linkages — in ep1151, the ConsentFix OAuth technique (real) was incorrectly fused with the CalPhishing .ics delivery vector (real) into a single false relationship. Both entities were legitimate; the link between them was fabricated. AUDITOR verification against primary sources caught it; generation-layer self-verification is not a control.
+
+**Claude Code Update Failure — Windows File Lock (2026-06-11):**
+Symptom: "✘ Auto-update failed: claude.exe in use". Root cause: Windows locks a running executable; Claude Code can't overwrite its own binary while any CLI session holds it. Repeats every launch because using the tool is the condition that blocks the update.
+
+CRITICAL — two different programs share the name: Claude Desktop at `C:\Program Files\WindowsApps\Claude_...` (MSIX, multi-process Electron tree) — Cowork, leave it alone — and Claude Code CLI at `C:\Users\darke\AppData\Roaming\npm\` (npm-global), the updater's target. Identify by PATH, never image name. `taskkill /IM claude.exe` hits BOTH and will kill a live Cowork session.
+
+Fix (from cold state, no CLI sessions running):
+```
+npm i -g @anthropic-ai/claude-code
+claude --version    # target >= 2.0.65 (closes CVE-2026-21852)
+```
+
+Hygiene: exit CLI with `/exit`, not by closing the terminal window — closing orphans the process and keeps the lock. Security tie-in: the npm allow-scripts/postinstall warning on update is the same vector as npm supply-chain worms (Miasma). Approve scripts deliberately; never blanket-allow.
+
+---
+
+## Phase 2
+
+**STAR_STRATEGY_DB_V2 — identity resolution (architectural debt):**
+This DB is carrying three overlapping identities and needs a canonical purpose decided before further manual writes:
+1. ORIGINAL: Barricade Cyber log tracker feeding the (now-wiped) VM lab.
+2. CURRENT CONTENT: strategic threat synthesis — entries with Strategic Pillar + vCISO Hot Take (macOS Tahoe, Axios NPM). Different cognitive product than CPE Tracker's raw intel feed.
+3. LIVE: STAR Logger is still actively connected and may auto-write.
+
+Risks: manual rows may collide with STAR Logger's schema/write expectations — do not hand-add entries until the logger's write behavior (fields, cadence, triggers) is mapped. "V2" implies a V1 exists — confirm/locate. Name (STRATEGY) no longer matches origin (lab-log). Drift unresolved.
+
+Decision needed (gated on VM lab rebuild): (a) remains strategic-synthesis DB → migrate lab-log schema + STAR Logger connection OUT to a dedicated lab-tracking DB; or (b) reverts to lab-tracking on rebuild → migrate strategic entries (macOS Tahoe, Axios) OUT to a dedicated Strategy DB. Endgame vision: faux VM lab + live-threat pentest in semi-sandboxed env — the lab-tracking DB should be scoped to that from the start, cleanly separated from strategic synthesis.
+
+Until resolved: park operational runbooks in CLAUDE.md, not this DB.
 
 ---
 
