@@ -839,7 +839,7 @@ def get_barricade_intel(url: str) -> str:
     Fetches a YouTube transcript via YouTubeTranscriptApi for Barricade Cyber
     (and other non-blocked sources). Avoids yt-dlp/Whisper/FFmpeg entirely.
     """
-    from youtube_transcript_api import YouTubeTranscriptApi, VideoUnplayable
+    from youtube_transcript_api import YouTubeTranscriptApi, VideoUnplayable, TranscriptsDisabled
 
     video_id = extract_video_id(url)
     print(f"📡 Fetching transcript for video {video_id}...")
@@ -848,6 +848,8 @@ def get_barricade_intel(url: str) -> str:
         transcript = ytt.fetch(video_id)
     except VideoUnplayable:
         raise RuntimeError(f"❌ Video {video_id} is unplayable or restricted — no transcript available.")
+    except TranscriptsDisabled:
+        raise RuntimeError(f"❌ Video {video_id} has transcripts disabled — no transcript available.")
     raw_text = " ".join(snippet.text for snippet in transcript)
     clean_text = scrub(raw_text)
     print(f"✅ Transcript ready: {len(clean_text.split()):,} words")
