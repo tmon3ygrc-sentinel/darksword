@@ -125,12 +125,6 @@ Hygiene: exit CLI with `/exit`, not by closing the terminal window — closing o
 
 ---
 
-## Known Issues
-
-**BLOCKER (2026-06-12): Notion 'tags' multi-select schema exceeded max size (~209KB). Blocks tag-bearing pushes. 6 ep1152 records queued in failed_records.txt (retry-safe via dedup guard). Fix = schema migration (tags multi-select → text or relation). Do NOT push tag-bearing records until resolved.**
-
----
-
 ## Phase 2
 
 **STAR_STRATEGY_DB_V2 — identity resolution (architectural debt):**
@@ -162,3 +156,9 @@ Until resolved: park operational runbooks in CLAUDE.md, not this DB.
 | `.env` | Live secrets — never commit |
 | `.env.example` | Safe template — placeholders only |
 | `requirements.txt` | Dependency manifest — tracked in git |
+
+---
+
+## Known Issues
+
+- **BLOCKER (2026-06-12): Notion 'tags' multi-select schema exceeded max size (~209KB; largest property 'tags'). Blocks any push that would add a new tag option. ep1152: 2/8 pushed, 6 records (03-08) queued in failed_records.txt. Retry is dedup-safe (record_exists guard skips the 2 already in). Root cause: 'tags' multi-select stores every unique option in schema permanently, no GC; unbounded cardinality (threat actors/CVEs/malware names) outgrew Notion's cap. Fix = schema migration (tags multi-select → plain text or relation to a Tags DB) — deliberate, back up DB first, affects existing records + views + [STAR] relation. DO NOT push tag-bearing records until resolved.**
