@@ -184,13 +184,13 @@ SELECT_FIELDS = {
 MULTI_SELECT_FIELDS = {
     "detection_opportunities", "attack_tactic",
     "identity_impact", "impacted_identity_provider",
-    "content_type", "cpe_category", "tags", "kill_chain_phase",
+    "content_type", "cpe_category", "kill_chain_phase",
     "attack_techniques", "target_sector",
     "threat_actor", "priority_level", "intel_category", "control_domains",
     "dfir_phase", "investigation_type"
 }
 
-RICH_TEXT_FIELDS = {"key_takeaways", "executive_summary", "operational_relevance", "record_id"}
+RICH_TEXT_FIELDS = {"key_takeaways", "executive_summary", "operational_relevance", "record_id", "tags"}
 DATE_FIELDS      = {"intel_date", "intel_timestamp"}
 NUMBER_FIELDS    = {"risk_severity_score"}
 
