@@ -956,9 +956,29 @@ def update_compliance_status(control_ids: List[str], log_page_url: str):
 # 8. THE ENGINE (PUSH_RECORD)
 # ===================================================================
 
+def record_exists(record_id: str) -> bool:
+    """Query CPE Tracker for an exact record_id match. Returns False for malformed IDs."""
+    if not record_id or str(record_id).lower() in ("unknown", "none", "empty", "n/a"):
+        return False
+    try:
+        res = notion.databases.query(
+            database_id=DATABASE_ID,
+            filter={"property": "record_id", "rich_text": {"equals": record_id}},
+            page_size=1
+        )
+        return len(res.get("results", [])) > 0
+    except Exception as e:
+        print(f"⚠️  Dedup check failed for {record_id}: {e} — proceeding with push")
+        return False
+
+
 def push_record(record: dict, source_label: str, url: str) -> bool:
     record_id  = record.get("record_id", "unknown")
     page_title = f"{source_label} - {record_id}"
+
+    if record_exists(record_id):
+        print(f"⏭️  {record_id} already exists — skipping")
+        return True  # not a failure; push_all must not log to failed_records.txt
 
     props = {
         "Title":        {"title": [{"text": {"content": page_title}}]},
@@ -1138,6 +1158,14 @@ def main():
         print("\n⚡ Auto-run: Choice 5 (RSS date detection → Show Notes → Notion)")
         try:
             date_str, youtube_url = get_rss_episode_date()
+        except (RuntimeError, ValueError) as e:
+            print(f"❌ Auto pipeline failed: {e}")
+            sys.exit(1)
+        today_str = date.today().isoformat()
+        if date_str < today_str:
+            print(f"⚠️  RSS latest episode is {date_str} — today is {today_str}. No new episode published. Exiting cleanly.")
+            sys.exit(0)
+        try:
             content, url          = get_show_notes(date_str)
         except (RuntimeError, ValueError) as e:
             print(f"❌ Auto pipeline failed: {e}")
@@ -1271,7 +1299,7 @@ def main():
                 print("⚠️  URL cannot be empty — records will have no source attribution. Enter a URL.")
             input("Save AI output to governance_input.txt then press ENTER...")
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
-            push_all(records, "Daily Threat Brief", url)
+            push_all(records, "Simply Cyber Daily Threat Brief", url)
 
         elif choice == "3" and TEST_MODE:
             while True:
@@ -1287,7 +1315,7 @@ def main():
             write_governance_file(raw_output)
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
-            push_all(records, "Daily Threat Brief", url)
+            push_all(records, "Simply Cyber Daily Threat Brief", url)
         elif choice == "4":
             if TEST_MODE:
                 print("❌ OTX mode disabled in --test.")
