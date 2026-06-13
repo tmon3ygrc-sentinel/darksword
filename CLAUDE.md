@@ -162,3 +162,15 @@ Until resolved: park operational runbooks in CLAUDE.md, not this DB.
 ## Known Issues
 
 - **BLOCKER (2026-06-12): Notion 'tags' multi-select schema exceeded max size (~209KB; largest property 'tags'). Blocks any push that would add a new tag option. ep1152: 2/8 pushed, 6 records (03-08) queued in failed_records.txt. Retry is dedup-safe (record_exists guard skips the 2 already in). Root cause: 'tags' multi-select stores every unique option in schema permanently, no GC; unbounded cardinality (threat actors/CVEs/malware names) outgrew Notion's cap. Fix = schema migration (tags multi-select → plain text or relation to a Tags DB) — deliberate, back up DB first, affects existing records + views + [STAR] relation. DO NOT push tag-bearing records until resolved.**
+
+---
+
+## Working Style
+
+Operator is an aspiring GRC engineer building this as a working tool and a portfolio piece. Engage low-level: explain mechanisms, name the class of problem, tie fixes to transferable principles. Expect frequent "why" questions — that's intentional learning, not confusion.
+
+**Discipline (enforce these):**
+- Verify before trust; read-only before destructive; back up before irreversible ops.
+- Show diffs / plans before executing. Operator is the approval gate. Per-action approval only — never blanket allow-all.
+- Hold the read-vs-run line: analyst agents (SENTINEL/AUDITOR/SCRIBE/RECON) think; ARCHITECT/Claude Code executes.
+- Don't initiate new work when operator is fatigued; park non-urgent, non-blocking items deliberately.
