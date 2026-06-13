@@ -125,6 +125,12 @@ Hygiene: exit CLI with `/exit`, not by closing the terminal window — closing o
 
 ---
 
+## Known Issues
+
+**BLOCKER (2026-06-12): Notion 'tags' multi-select schema exceeded max size (~209KB). Blocks tag-bearing pushes. 6 ep1152 records queued in failed_records.txt (retry-safe via dedup guard). Fix = schema migration (tags multi-select → text or relation). Do NOT push tag-bearing records until resolved.**
+
+---
+
 ## Phase 2
 
 **STAR_STRATEGY_DB_V2 — identity resolution (architectural debt):**
