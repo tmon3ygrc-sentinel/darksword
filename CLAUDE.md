@@ -51,7 +51,7 @@ The Architect is the default Claude Code identity for this repository. You own t
 
 **Venv:** `C:\Work\GRC\.venv` (shared across projects)
 
-**Task Scheduler:** `run_darksword_auto.ps1` → `notion_logger_v7.py --auto` — weekdays at noon. Logs to `darksword_YYYY-MM-DD.log`.
+**Task Scheduler:** `run_darksword_auto.ps1` → `notion_logger_v7.py --auto` — weekdays at 14:00 (changed from noon 2026-06-14: noon raced episode publish — ep1152 dropped at 12:18, triggering prior-day re-ingest; 2pm gives margin past typical publish). Logs to `darksword_YYYY-MM-DD.log`.
 
 ---
 
