@@ -161,7 +161,10 @@ Until resolved: park operational runbooks in CLAUDE.md, not this DB.
 
 ## Known Issues
 
-- **BLOCKER (2026-06-12): Notion 'tags' multi-select schema exceeded max size (~209KB; largest property 'tags'). Blocks any push that would add a new tag option. ep1152: 2/8 pushed, 6 records (03-08) queued in failed_records.txt. Retry is dedup-safe (record_exists guard skips the 2 already in). Root cause: 'tags' multi-select stores every unique option in schema permanently, no GC; unbounded cardinality (threat actors/CVEs/malware names) outgrew Notion's cap. Fix = schema migration (tags multi-select → plain text or relation to a Tags DB) — deliberate, back up DB first, affects existing records + views + [STAR] relation. DO NOT push tag-bearing records until resolved.**
+- **RESOLVED (2026-06-14): Notion schema-size cap exceeded — all 8 ep1152 records now pushed.** Root cause was cumulative multi-select schema weight, NOT `tags` alone. The error named `tags` as a symptom (largest property at ~208KB), but the real culprits were prose-content fields wrongly typed as multi-select — `identity_impact` (~140KB) and `detection_opportunities` (~49KB) — that accreted unbounded options over time. Fix: delete + recreate those two properties as fresh `rich_text` (GUI type-conversion does NOT reclaim orphaned options; only delete evicts them from Notion's internal schema ledger). `tags` was NOT deleted — evicting the two prose fields dropped total schema to ~164KB, under cap, and all 6 queued ep1152 records (03-08) pushed clean; `record_exists` dedup guard correctly skipped the 1 already present. Lesson: Notion's schema cap is cumulative across all properties; the error names a symptom not the root cause; when a "fixed" field still blocks, re-measure the whole system. Resolved 2026-06-14.
+
+**Phase 2 watch-list — remaining categorical multi-selects will accrete toward cap over time:**
+`control_domains` (32KB), `target_sector` (30KB), `threat_actor` (28KB), `attack_techniques` (24KB). Revisit cardinality via `diag_option_cardinality.py` if total schema trends up. Decision needed per runbook §1: keep as enum (closed vocabulary, constrained prompt) or convert to `rich_text` permanently.
 
 ---
 
