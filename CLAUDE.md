@@ -25,7 +25,7 @@
 
 ---
 
-## System State (as of 2026-06-11)
+## System State (as of 2026-06-14)
 
 **Active engine:** `notion_logger_v7.py`
 
