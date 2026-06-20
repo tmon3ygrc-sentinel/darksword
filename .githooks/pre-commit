@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+#
+# DARKSWORD pre-commit hook — block commits that introduce secrets.
+# Scans ONLY staged changes (fast). Wired via:  git config core.hooksPath .githooks
+#
+set -euo pipefail
+
+# Resolve gitleaks; FAIL CLOSED if missing — a security gate must never silently skip.
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "X pre-commit: gitleaks not found on PATH — cannot scan staged changes."
+  echo "  Install it / add it to PATH, then retry. (Refusing to commit unscanned.)"
+  exit 1
+fi
+
+# Scan staged content. --redact masks any match so secrets never hit the terminal/scrollback.
+if ! gitleaks git --staged --redact --no-banner -v; then
+  echo ""
+  echo "X pre-commit: gitleaks detected a secret in your STAGED changes (values redacted above)."
+  echo "  Remove or rotate it. If it's a confirmed false positive, use a 'gitleaks:allow' comment"
+  echo "  on the line or add the path to .gitleaksignore. Commit blocked."
+  exit 1
+fi
+
+exit 0
