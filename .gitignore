@@ -47,3 +47,10 @@ client_secrets.json
 token.pickle
 barricade_last_ingested.txt
 !requirements.txt
+
+# DB exports / backups — never commit (public repo)
+backups/
+*.zip
+
+# Security / attack-surface doc — keep out of public git history
+DARKSWORD_RECON_DevSecOps_Review.md

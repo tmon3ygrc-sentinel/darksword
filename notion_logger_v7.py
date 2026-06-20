@@ -1114,6 +1114,9 @@ def parse_records(file_path: Path) -> List[dict]:
 
 def push_all(records: list, source_label: str, url: str):
     """Pushes all records and saves any failures for retry."""
+    if not records:
+        print("❌ No records parsed — check delimiters / input file. Nothing pushed.")
+        return
     failed = []
     for r in records:
         success = push_record(r, source_label, url)

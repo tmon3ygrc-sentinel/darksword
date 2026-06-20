@@ -121,6 +121,12 @@ Control was missing from Master Frameworks (only the L1 variant `IA.L1-3.5.1` wa
 **`TranscriptsDisabled` added to `get_barricade_intel()` catch block — 2026-06-11 (commit 3d19dc9):**
 Previously, videos with captions disabled (common on thin Monday episodes) raised an unhandled `TranscriptsDisabled` exception → exit code 1 crash. Now caught alongside `VideoUnplayable` and re-raised as a clean `RuntimeError` → exit code 0.
 
+**Barricade silent-zero — two classes of "no new records" (flagged 2026-06-19):**
+Barricade runs can legitimately yield zero new records via two silent paths: (1) already-ingested (dedup), and (2) restricted/unplayable video skipped. Both are non-errors, so a quiet feed and a working-but-filtered feed look identical day to day. Watch-item, not a bug: if Barricade yields zero new records day over day, check whether the RSS feed itself has gone quiet vs. everything being legitimately filtered. No action when isolated.
+
+**Sandbox clock is UTC — date off-by-one near midnight (flagged 2026-06-19):**
+The Cowork Linux sandbox shell runs UTC; a naive `date +%Y-%m-%d` in bash can be a day ahead of local (sandbox 2026-06-20 while local is 2026-06-19). Any log-by-date lookup must pin local TZ — `TZ='America/New_York' date +%Y-%m-%d` — or it requests the wrong log file and falsely reports "no log found" on a day the pipeline ran. Same Git Bash / timezone seam class. Fixed in `Scheduled/darksword-daily-status/SKILL.md` 2026-06-19.
+
 **Vetting note (ep1151, 2026-06-11): Verify entity *relationships*, not just entity existence.**
 Real proper nouns can be welded into false linkages — in ep1151, the ConsentFix OAuth technique (real) was incorrectly fused with the CalPhishing .ics delivery vector (real) into a single false relationship. Both entities were legitimate; the link between them was fabricated. AUDITOR verification against primary sources caught it; generation-layer self-verification is not a control.
 
