@@ -1,0 +1,2 @@
+# Shell hooks must stay LF — CRLF breaks the shebang on non-Windows clones.
+.githooks/** text eol=lf

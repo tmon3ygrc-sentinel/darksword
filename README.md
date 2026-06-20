@@ -6,8 +6,6 @@ A multi-source intelligence pipeline that ingests daily security content from sh
 
 Built as part of the **STAR Project** (Self-Transformation through Adversarial Rigor) — a hands-on vCISO development program. Manual mastery first, automation second.
 
-Current build: `fe2fbe0`
-
 ---
 
 ## Why DARKSWORD
@@ -191,6 +189,16 @@ Set the `cpe` alias in `~/.bashrc`:
 ```bash
 alias cpe='cd /c/Work/GRC/darksword && /c/Work/GRC/.venv/Scripts/python.exe notion_logger_v7.py'
 ```
+
+### Security: activate the pre-commit hook
+
+This repo ships a `gitleaks` pre-commit hook (`.githooks/pre-commit`) that scans staged changes and **blocks any commit containing a secret**. Git does not auto-run hooks from a clone (a deliberate remote-code-execution safeguard), so enable it once after cloning:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Requires the [`gitleaks`](https://github.com/gitleaks/gitleaks) binary on `PATH`. To confirm it's live, stage a fake secret and attempt a commit — the hook should reject it.
 
 ### Key dependencies
 
