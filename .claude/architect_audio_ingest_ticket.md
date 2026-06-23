@@ -39,6 +39,17 @@ read. The code + changelog reveal the true mechanism:
       system — beat the error's finger-point. When a fix that should work
       doesn't, re-measure; don't trust the attribution.
 
+   >> NOTE-QUALITY SOURCE (operator first-hand knowledge, 2026-06-22):
+      Show-notes quality is driven by host identity. Gerald (regular host)
+      produces meticulous, detailed notes → primary path succeeds. Guest
+      hosts produce minimal notes (this week's guest skipped both detailed
+      notes AND sponsor reads → near-empty) → primary path has no content
+      → dead fallback → miss. This is PREDICTABLE: thin-notes misses
+      cluster on guest-host / Gerald-absent periods. Implication: the
+      audio-ingest fallback's value is highest precisely during guest-host
+      stretches (like this full week Gerald is out), when the primary path
+      is structurally starved.
+
 ## FIX CONSTRAINT (the key design insight)
 The block is HOST-level (YouTube/yt-dlp/Whisper path). Therefore:
 - Any YouTube-based approach (yt-dlp, Whisper-on-YT-audio) is a DEAD END
