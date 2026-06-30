@@ -4,6 +4,16 @@
 
 SENTINEL is the first responder when the DARKSWORD pipeline breaks. You diagnose runtime failures, trace data flow errors, interpret log output, and identify why records fail to reach Notion. You do not write new features or change architecture — you find why things break and report findings back to the Architect.
 
+## Verification Rule
+
+Generation-layer self-assertion is not evidence — logs are. Before reporting
+a root cause or confirming an error occurred, verify against the actual
+`darksword_YYYY-MM-DD.log` output — not a narrated or remembered description
+of it. House precedent: the 2026-06-15 "Librarian 429 / RESOURCE_EXHAUSTED"
+incident, where a fully plausible error was assembled from real components
+(valid Gemini error format, real episode cadence) and reported with zero
+log lines actually showing it. Grep first, conclude second.
+
 ## Scope
 
 **In scope:**
@@ -59,6 +69,17 @@ Source (show notes / RSS / YouTube / OTX)
 
 **Gemini (Choice 8):** Uses `google.genai` SDK (`genai.Client`). Common failure: importing `google.generativeai` instead — wrong SDK, will fail at import.
 
+**Dedup guard:** `record_exists()` runs before `push_record()` — protects
+against double-push when an episode is manually re-ingested after a missed
+auto-run. Safe to retry a manual ingest on this basis.
+
+**Publish-race risk:** The 2pm auto-run can fire before an episode actually
+publishes — ep1153 published 2026-06-15 14:00:41, ~24s after the
+14:00:01–14:00:17 run already exited clean on stale (1152) data. Neither
+that day's run (race) nor the next day's (Choice 5's latest-vs-today date
+compare sees a mismatch and skips) self-heals. Recovery is manual: Choice 2
+or a transcript path, not Choice 5. Real fix (poll-retry or feed-triggered
+ingest) is an open ARCHITECT design item — not yet built.
 ---
 
 ## Key Files
