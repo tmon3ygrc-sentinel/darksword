@@ -49,11 +49,12 @@ Current sensitive exclusions:
 ```
 .env / *.env / auth.json / secrets.py / notion_token*   # secrets
 *.log                                                    # scheduler logs (may contain API responses)
-*.txt / *.csv                                            # data files (governance_input, failed_records, etc.)
-.claude/                                                 # local Claude config
-!.claude/*.md                                            # agent briefings are committed
-!requirements.txt                                        # dependency manifest tracked
-GovSCH/ / GRC-Playground/                               # nested study repos ignored
+*.txt / *.csv                                            # data files (duplicated in file — minor cleanup pending)
+.claude/settings.json / .claude/settings.local.json     # settings only; .claude/*.md briefings tracked directly
+!requirements.txt / !prompts/*.md                        # explicit inclusions
+GovSCH/ / GRC-Playground/ / FlowCharts/                 # ignored directories
+backups/ / *.zip                                         # exports/backups — never commit (public repo)
+DARKSWORD_RECON_DevSecOps_Review.md                      # security doc — out of public history
 ```
 
 ### Dependencies (`requirements.txt`)
@@ -78,7 +79,7 @@ SSH signing key is configured. Key times out after inactivity — commits will f
 
 ### `.claude/settings.local.json`
 
-Contains Bash permission allowlist (not secrets, but local config). Must stay gitignored. The `!.claude/*.md` exception only applies to markdown briefing files.
+Contains Bash permission allowlist (not secrets, but local config). Must stay gitignored. Note: `.claude/` is NOT directory-ignored — only the two settings files are excluded. Agent briefing `.md` files are tracked directly, not via a `!.claude/*.md` exception.
 
 ---
 
