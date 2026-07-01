@@ -31,6 +31,7 @@ Thumbs.db
 # Ignore nested study repos
 GovSCH/
 GRC-Playground/
+FlowCharts/
 
 # Claude Code local settings (settings files stay local; agent briefings are committed)
 .claude/settings.json
@@ -47,6 +48,7 @@ client_secrets.json
 token.pickle
 barricade_last_ingested.txt
 !requirements.txt
+!prompts/*.md
 
 # DB exports / backups — never commit (public repo)
 backups/
