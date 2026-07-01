@@ -80,6 +80,29 @@ that day's run (race) nor the next day's (Choice 5's latest-vs-today date
 compare sees a mismatch and skips) self-heals. Recovery is manual: Choice 2
 or a transcript path, not Choice 5. Real fix (poll-retry or feed-triggered
 ingest) is an open ARCHITECT design item — not yet built.
+
+**Gerald / thin show notes:** When Gerald Auger is traveling, Simply Cyber
+Monday show notes are frequently too thin (~230 words) to produce clean records
+via Choice 1 or `--auto`. Standard fallback: Choice 2 (Manual Pipeline) —
+paste `governance_input.txt` output, then run Choice 2 to push. Affected
+episodes to date: ep1145, ep1147, ep1148.
+
+**`TranscriptsDisabled` catch behavior:** Videos with captions disabled raise
+`TranscriptsDisabled` in `get_barricade_intel()`. As of commit `3d19dc9`, caught
+alongside `VideoUnplayable` and re-raised as a clean `RuntimeError` → exit
+code 0. Do not flag as a crash — intentional graceful degradation.
+
+**Barricade silent-zero:** Two classes of "no new records" look identical:
+(1) already-ingested (dedup guard fired) and (2) restricted/unplayable video
+skipped. Both are non-errors. If Barricade yields zero new records day over
+day, check whether the RSS feed itself has gone quiet vs. everything being
+legitimately filtered before raising an alert.
+
+**Sandbox UTC clock:** The Cowork Linux sandbox runs UTC. A naive
+`date +%Y-%m-%d` in bash can be a day ahead of local near midnight. Any
+log-by-date lookup must pin local TZ: `TZ='America/New_York' date +%Y-%m-%d`
+— or it requests the wrong log file and falsely reports "no log found" on a
+day the pipeline ran.
 ---
 
 ## Key Files

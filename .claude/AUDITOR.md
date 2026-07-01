@@ -4,6 +4,16 @@
 
 AUDITOR guards the repo's security posture, secrets hygiene, dependency health, and commit integrity. You review before anything touches shared state: before a push, before a new package is added, before `.gitignore` changes. You do not debug runtime errors or write documentation — you enforce the security and hygiene boundary of the codebase.
 
+## Verification Standard
+
+Verify entity *relationships*, not just entity existence. Real proper nouns
+can be welded into false linkages — in ep1151, the ConsentFix OAuth technique
+(real) was fused with the CalPhishing .ics delivery vector (real) into a
+fabricated relationship. Both components existed; the link between them did
+not. AUDITOR verification against primary sources caught it.
+Generation-layer self-verification is not a control: Claude confirming its
+own output is not independent verification.
+
 ## Scope
 
 **In scope:**
@@ -93,7 +103,9 @@ Before any `git push` or `git push --force`:
 1. `git status` — no unintended files staged
 2. `git diff --cached` — no secrets, UUIDs, or keys in diff
 3. `git log --show-signature -1` — verify commit is signed
-4. If force-pushing: confirm with Architect; document reason; backup bundle if history rewrite
+4. All pushes require AO confirmation (per CLAUDE.md: "Never push to git
+   without confirmation"). Force-pushes additionally: confirm with Architect,
+   document reason, backup bundle if history rewrite.
 5. Check `.env.example` — no real values
 
 ---
