@@ -489,7 +489,7 @@ def get_show_notes(target_date: str = None) -> tuple:
     return clean_text, episode_url
 
 
-def get_rss_episode_date() -> tuple[str, str | None]:
+def get_rss_episode_date() -> tuple[str, str | None, str | None]:
     FEED_URL = "https://feeds.transistor.fm/simply-cyber"
     print(f"📡 Checking RSS feed for latest episode date: {FEED_URL}...")
     feed = feedparser.parse(FEED_URL)
@@ -513,23 +513,12 @@ def get_rss_episode_date() -> tuple[str, str | None]:
             if "youtube.com" in href or "youtu.be" in href:
                 youtube_url = href
                 break
+    transistor_url = None
+    encs = latest.get("enclosures")
+    if encs:
+        transistor_url = encs[0].get("href")
     print(f"✅ Latest episode: {title} → {date_str}" + (f" | YouTube: {youtube_url}" if youtube_url else ""))
-    return date_str, youtube_url
-
-
-def scrape_episode_youtube_url(episode_url: str) -> str | None:
-    try:
-        resp = requests.get(episode_url, timeout=15)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"⚠️  Could not fetch episode page for YouTube scrape: {e}")
-        return None
-    soup = BeautifulSoup(resp.text, "html.parser")
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if "youtube.com/watch" in href or "youtu.be/" in href:
-            return href
-    return None
+    return date_str, youtube_url, transistor_url
 
 
 BARRICADE_LAST_FILE = SCRIPT_DIR / "barricade_last_ingested.txt"
@@ -692,35 +681,6 @@ def get_otx_pulses(api_key: str, lookback_hours: int = 24) -> list:
         })
     return results
 
-def get_transcript(url: str) -> str:
-    import tempfile
-    import whisper
-    import yt_dlp
-    print("📡 Downloading audio for transcription...")
-    video_id = extract_video_id(url)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        audio_path = f"{tmpdir}/{video_id}.mp3"
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": audio_path,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "64",
-            }],
-            "quiet": True,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        print("🎙️ Transcribing with Whisper (this may take 1-2 minutes)...")
-        model = whisper.load_model("base")
-        result = model.transcribe(audio_path + ".mp3")
-        raw_text = result["text"]
-    clean_text = scrub(raw_text)
-    print(f"✅ Transcript ready: {len(clean_text.split()):,} words")
-    return clean_text
-
-
 def get_barricade_intel(url: str) -> str:
     from youtube_transcript_api import YouTubeTranscriptApi, VideoUnplayable, TranscriptsDisabled
     video_id = extract_video_id(url)
@@ -736,6 +696,63 @@ def get_barricade_intel(url: str) -> str:
     clean_text = scrub(raw_text)
     print(f"✅ Transcript ready: {len(clean_text.split()):,} words")
     return clean_text
+
+
+AUDIO_PREPASS_PROMPT = """You are extracting discrete cybersecurity news stories from a raw podcast
+transcript. The transcript is conversational — ignore host banter, sponsor
+reads, intros, and outros. For each distinct news story discussed, output:
+
+Story N: [2-3 sentences. What happened, who was involved, the security
+significance. Facts only — no analysis.]
+
+Do not add clarifying glosses, translations, or your own labels for names
+or terms mentioned in the transcript. Transcribe ambiguous terms exactly
+as heard, with no interpretation of what they might refer to.
+
+Output only the story list. No headers, no commentary, no formatting.
+If a story is mentioned multiple times, output it once using the most
+complete version."""
+
+
+def get_audio_transcript(enclosure_url: str) -> str:
+    import torch
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "❌ Audio path requires CUDA — CPU fallback exceeds scheduler "
+            "timeout. Aborting."
+        )
+    from faster_whisper import WhisperModel
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = Path(tmpdir) / "episode.mp3"
+        resp = requests.get(enclosure_url, stream=True, timeout=60)
+        resp.raise_for_status()
+        total_bytes = int(resp.headers.get("Content-Length", 0))
+        print(f"📡 Downloading audio enclosure ({total_bytes / 1_048_576:.1f} MB): {enclosure_url}")
+        with open(audio_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                f.write(chunk)
+        print("🎙️ Transcribing with faster-whisper (large-v2, CUDA)...")
+        model = WhisperModel("large-v2", device="cuda", compute_type="float16")
+        segments, _info = model.transcribe(str(audio_path))
+        raw_text = " ".join(segment.text for segment in segments)
+    clean_text = scrub(raw_text)
+    print(f"✅ Transcript ready: {len(clean_text.split()):,} words")
+    return clean_text
+
+
+def extract_stories_from_transcript(transcript: str, url: str, today: str) -> str:
+    print("🧠 Extracting stories from transcript (pre-pass)...")
+    user_message = f"Source URL: {url}\nDate Watched: {today}\n\nTRANSCRIPT:\n{transcript}"
+    message = claude.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4000,
+        system=AUDIO_PREPASS_PROMPT,
+        messages=[{"role": "user", "content": user_message}]
+    )
+    story_summary = message.content[0].text
+    print(f"✅ Story extraction complete — {len(story_summary.split()):,} words")
+    return story_summary
 
 
 def get_gemini_transcript(url: str) -> str:
@@ -1031,7 +1048,7 @@ def main():
     if AUTO_MODE:
         print("\n⚡ Auto-run: Choice 5 (RSS date detection → Show Notes → Notion)")
         try:
-            date_str, youtube_url = get_rss_episode_date()
+            date_str, youtube_url, transistor_url = get_rss_episode_date()
         except (RuntimeError, ValueError) as e:
             print(f"❌ Auto pipeline failed: {e}")
             sys.exit(1)
@@ -1047,19 +1064,17 @@ def main():
 
         word_count = len(content.split())
         if word_count < 500:
-            print(f"⚠️  Show notes too short ({word_count} words) — falling back to YouTube transcript.")
-            if not youtube_url:
-                print("⚠️  No YouTube URL in RSS feed — scraping episode page...")
-                youtube_url = scrape_episode_youtube_url(url)
-            if not youtube_url:
-                print("❌ No YouTube URL found in RSS feed or episode page — cannot fall back. Exiting.")
-                sys.exit(0)
+            print(f"⚠️  Show notes too short ({word_count} words) — attempting audio ingest.")
+            if not transistor_url:
+                print("❌ No Transistor enclosure URL in RSS feed — cannot fall back. Exiting.")
+                sys.exit(1)
             try:
-                content = get_barricade_intel(youtube_url)
-                url     = youtube_url
+                raw_transcript = get_audio_transcript(transistor_url)
+                content = extract_stories_from_transcript(raw_transcript, transistor_url, date.today().isoformat())
+                url = transistor_url
             except (RuntimeError, ValueError) as e:
-                print(f"❌ YouTube transcript fallback also failed: {e} — exiting cleanly.")
-                sys.exit(0)
+                print(f"❌ Audio ingest failed: {e} — exiting. Manual ingest required.")
+                sys.exit(1)
 
         try:
             raw_output = analyze_with_claude(content, url, date.today().isoformat())
@@ -1226,7 +1241,7 @@ def main():
                 print("❌ RSS auto-detect mode disabled in --test.")
                 continue
             try:
-                date_str, _yt   = get_rss_episode_date()
+                date_str, _yt, _transistor = get_rss_episode_date()
                 content, url    = get_show_notes(date_str)
                 raw_output      = analyze_with_claude(content, url, date.today().isoformat())
                 write_governance_file(raw_output)
