@@ -12,7 +12,7 @@ Read today's DARKSWORD pipeline log file and produce a concise status report cov
 
 1. Determine today's date (use bash: `TZ='America/New_York' date +%Y-%m-%d`). NOTE: the sandbox shell clock is UTC — you MUST pin local TZ, or near midnight you'll be a day ahead and request the wrong (nonexistent) log file, falsely reporting "no log found."
 2. Read the log file at: `C:\Work\GRC\darksword\darksword_YYYY-MM-DD.log` where YYYY-MM-DD is today's date. Use the Read tool or bash (`cat /sessions/*/mnt/darksword/darksword_$(TZ='America/New_York' date +%Y-%m-%d).log`).
-3. If the log file does not exist, report: "No log file found for today — pipeline may not have run."
+3. If the log file does not exist, first check whether today's date falls in the **Known Dark Days** list below. If it does, report: "No episode expected today ({reason}) — pipeline correctly found nothing to process. Not a failure." and stop; do not use the ❌/⚠️ verdict language for this case. If today's date is NOT in the list, report: "No log file found for today — pipeline may not have run." and use verdict ❌ Failed (or flag for investigation).
 4. Parse the log and produce a report with these sections:
 
 **Pipeline Run Summary**
@@ -34,6 +34,13 @@ Read today's DARKSWORD pipeline log file and produce a concise status report cov
 
 ## Output format
 Plain prose with the four sections above. Keep it concise — this is a daily ops digest, not a full audit. No need to repeat raw log lines unless they contain the only relevant error detail.
+
+## Known Dark Days
+The source show (Simply Cyber) sometimes goes dark for holidays — no episode means no log, which is expected, not a pipeline failure. Maintain this list and extend it as the user tells you about upcoming hiatuses:
+
+- 2026-07-03, 2026-07-04, 2026-07-05, 2026-07-06 — July 4th holiday weekend (per user note 2026-07-03; show confirmed dark, no episode)
+
+When the user mentions a future hiatus in conversation, a scheduled-task update should append the new date(s) and reason to this list.
 
 ## Constraints
 - Never modify any files.
