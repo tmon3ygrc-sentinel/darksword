@@ -36,6 +36,7 @@ import requests
 from datetime import date
 from pathlib import Path
 from typing import List, Dict
+from collections import defaultdict
 from bs4 import BeautifulSoup
 from notion_client import Client
 from dotenv import load_dotenv
@@ -169,7 +170,7 @@ CATEGORY_TO_WEEKS = {
     "identity-intelligence": ["Week 13"],
 }
 
-CMMC_CACHE: Dict[str, str] = {}
+CMMC_CACHE: Dict[str, list] = defaultdict(list)  # nist_ref → [(maturity, page_id), ...]
 CMMC_MISSES: List[str] = []
 
 # ===================================================================
@@ -212,7 +213,7 @@ You MUST populate ALL fields. Use "Unknown" or "None" if data is unavailable.
 DO NOT use markdown formatting in the output.
 DO NOT use bullet points in field values.
 DO NOT omit any fields.
-Only use control IDs that exist in CMMC 2.0 / NIST 800-171 Rev 2. 
+Only use control IDs that exist in CMMC 2.0 / NIST 800-171 Rev 2.
 Do NOT invent or approximate control IDs. If unsure, use "None".
 
 ### OUTPUT FORMAT RULES
@@ -346,24 +347,18 @@ Before finalizing output:
 # ===================================================================
 OTX_ANALYST_PROMPT = (
     ANALYST_PROMPT
-    # Schema: pre-fill content_type and content_category for OTX pulses.
-    # Both fields are now in the base schema; target the two-line sequence
-    # to avoid a duplicate content_category:: line.
     .replace(
         'content_type::\ncontent_category::\n',
         'content_type:: Threat Intelligence Feed\ncontent_category:: Threat Intelligence\n'
     )
-    # Field def: explicitly forbid the Podcast/Video default
     .replace(
         '- **content_type**: Always "Podcast/Video".',
         '- **content_type**: ALWAYS "Threat Intelligence Feed" for OTX pulses. Do NOT use "Podcast/Video".'
     )
-    # Field def: content_category with OTX default; add explicit "do not leave blank"
     .replace(
         '- **content_category**: Threat Intelligence, AI Governance / Privacy Law, Technical, Management, DFIR, Compliance, Strategic, Legal-Regulatory. Select closest match. Do NOT invent new categories.',
         '- **content_category**: For OTX pulses, default to "Threat Intelligence". Override only if content is clearly advisory, compliance, or strategic. Do NOT leave blank.'
     )
-    # Field def: inject impacted_identity_provider definition (missing from base prompt)
     .replace(
         '- **investigation_type**:',
         '- **impacted_identity_provider**: Identity provider targeted by this threat. ALWAYS populate. Values (comma-separated): on-prem-ad, entra-id, okta, google-workspace, mfa-provider, aws-iam, none, unknown. Use "unknown" if unclear. Do NOT leave blank.\n- **investigation_type**:'
@@ -418,41 +413,53 @@ def normalize_cid(cid: str) -> str:
     cid = re.sub(r'\s+', '-', cid)
     return cid
 
+
+def parse_control_id(token: str):
+    """
+    Parse a CMMC control ID token into (level, nist_ref).
+    Input: "AC.L1-3.1.20" → ("L1", "3.1.20")
+    Returns (None, None) on parse failure.
+    """
+    m = re.match(r'^[A-Z]+\.(L\d)-(.+)$', token.strip().upper())
+    if m:
+        return m.group(1), m.group(2)
+    return None, None
+
+
+def resolve_control(token: str) -> str | None:
+    """
+    Resolve a CMMC control ID to a Notion page ID using the NIST ref index.
+    Prefers exact level match; falls back to any row with the same NIST ref.
+    Returns page_id or None if unresolvable.
+    """
+    level, nist_ref = parse_control_id(token)
+    if not nist_ref:
+        return None
+    candidates = CMMC_CACHE.get(nist_ref, [])
+    if not candidates:
+        return None
+    for (row_level, page_id) in candidates:
+        if row_level == level:
+            return page_id
+    print(f"    ⚠️  resolve_control: {token} — no {level} row; "
+          f"falling back to {candidates[0][0]} row for ref {nist_ref}")
+    return candidates[0][1]
+
 # ===================================================================
 # 6. PIPELINE FUNCTIONS
 # ===================================================================
 
 def get_show_notes(target_date: str = None) -> tuple:
-    """
-    Fetches structured show notes from cyberthreatbrief.simplycyber.io.
-
-    Replaces get_transcript() for Simply Cyber content — no YouTube API,
-    no yt-dlp, no Whisper, no FFmpeg. Just a clean web fetch.
-
-    Args:
-        target_date: YYYY-MM-DD string. Defaults to today.
-                     Use this to backfill: get_show_notes("2026-05-20")
-
-    Returns:
-        (clean_text, canonical_url) tuple
-
-    Raises:
-        RuntimeError: Episode not found or page fetch failed.
-    """
     date_str = target_date or date.today().isoformat()
     print(f"📡 Fetching show notes for {date_str}...")
-
-    # Step 1: Find today's episode URL from the listing page
     listing_url = "https://cyberthreatbrief.simplycyber.io/episodes/"
     try:
         resp = requests.get(listing_url, timeout=15)
         resp.raise_for_status()
     except requests.RequestException as e:
         raise RuntimeError(f"❌ Could not reach episodes listing: {e}")
-
     soup = BeautifulSoup(resp.text, "html.parser")
     episode_url = None
-
     for a in soup.find_all("a", href=True):
         href = a["href"]
         if date_str in href and "top-cyber-news-now" in href:
@@ -461,68 +468,41 @@ def get_show_notes(target_date: str = None) -> tuple:
                 else f"https://cyberthreatbrief.simplycyber.io{href}"
             )
             break
-
     if not episode_url:
         raise RuntimeError(
             f"❌ No episode found for {date_str}.\n"
             f"   Check: {listing_url}\n"
             f"   Episode may not be published yet — try again in 30 min."
         )
-
     print(f"📄 Episode found: {episode_url}")
-
-    # Step 2: Fetch the episode page
     try:
         ep_resp = requests.get(episode_url, timeout=15)
         ep_resp.raise_for_status()
     except requests.RequestException as e:
         raise RuntimeError(f"❌ Could not fetch episode page: {e}")
-
     ep_soup = BeautifulSoup(ep_resp.text, "html.parser")
-
-    # Strip nav/footer/script noise — keep article body only
     for tag in ep_soup(["nav", "footer", "script", "style", "header"]):
         tag.decompose()
-
     raw_text = ep_soup.get_text(separator="\n", strip=True)
     clean_text = scrub(raw_text)
-
     print(f"✅ Show notes ready: {len(clean_text.split()):,} words")
     return clean_text, episode_url
 
 
 def get_rss_episode_date() -> tuple[str, str | None]:
-    """
-    Returns (date_str, youtube_url) for the most recent Simply Cyber episode.
-
-    date_str is YYYY-MM-DD from the entry's pubDate. youtube_url is the full
-    YouTube watch URL if extractable from the feed entry (via yt_videoid or a
-    YouTube href in entry.links), otherwise None.
-
-    Raises:
-        RuntimeError: Feed unreachable, parse failure, or no entries found.
-    """
     FEED_URL = "https://feeds.transistor.fm/simply-cyber"
     print(f"📡 Checking RSS feed for latest episode date: {FEED_URL}...")
-
     feed = feedparser.parse(FEED_URL)
-
     if feed.bozo and not feed.entries:
         raise RuntimeError(f"❌ RSS feed parse failed: {feed.bozo_exception}")
-
     if not feed.entries:
         raise RuntimeError("❌ No episodes found in feed.")
-
     latest = feed.entries[0]
     title  = latest.get("title", "Unknown")
-
     parsed = latest.get("published_parsed")
     if not parsed:
         raise RuntimeError("❌ No pubDate found in latest feed entry.")
-
     date_str = f"{parsed.tm_year:04d}-{parsed.tm_mon:02d}-{parsed.tm_mday:02d}"
-
-    # Extract YouTube URL from feed entry
     youtube_url = None
     yt_id = latest.get("yt_videoid")
     if yt_id:
@@ -533,27 +513,17 @@ def get_rss_episode_date() -> tuple[str, str | None]:
             if "youtube.com" in href or "youtu.be" in href:
                 youtube_url = href
                 break
-
     print(f"✅ Latest episode: {title} → {date_str}" + (f" | YouTube: {youtube_url}" if youtube_url else ""))
     return date_str, youtube_url
 
 
 def scrape_episode_youtube_url(episode_url: str) -> str | None:
-    """
-    Scrapes a cyberthreatbrief.simplycyber.io episode page for an embedded
-    YouTube link (e.g. the 'Watch on YouTube →' anchor).
-
-    Called as a fallback when the RSS feed entry carries no yt_videoid or
-    YouTube href. Returns the first youtube.com/watch or youtu.be URL found
-    on the page, or None if not present.
-    """
     try:
         resp = requests.get(episode_url, timeout=15)
         resp.raise_for_status()
     except requests.RequestException as e:
         print(f"⚠️  Could not fetch episode page for YouTube scrape: {e}")
         return None
-
     soup = BeautifulSoup(resp.text, "html.parser")
     for a in soup.find_all("a", href=True):
         href = a["href"]
@@ -566,83 +536,45 @@ BARRICADE_LAST_FILE = SCRIPT_DIR / "barricade_last_ingested.txt"
 
 
 def get_barricade_latest() -> tuple[str, str] | None:
-    """
-    Returns (video_id, title) for the most recent playable Barricade Cyber video,
-    or None if the newest ingestable entry was already ingested.
-
-    Polls the YouTube channel RSS feed (up to 15 entries). Each candidate is
-    probed with ytt.fetch(); any exception means the video is skipped and the
-    next entry is tried. Only returns a video ID that successfully fetched a
-    transcript. Does NOT write barricade_last_ingested.txt — the caller must
-    do that after a successful push.
-
-    Raises:
-        RuntimeError: Feed unreachable, parse failure, or all 15 entries restricted.
-    """
     from youtube_transcript_api import YouTubeTranscriptApi
-
     FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UCLco-g6YIjhPqOBBR6CUXpg"
     print(f"📡 Checking Barricade Cyber RSS feed...")
-
     feed = feedparser.parse(FEED_URL)
-
     if feed.bozo and not feed.entries:
         raise RuntimeError(f"❌ Barricade RSS feed parse failed: {feed.bozo_exception}")
-
     if not feed.entries:
         raise RuntimeError("❌ No videos found in Barricade Cyber feed.")
-
     try:
         last_id = BARRICADE_LAST_FILE.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         last_id = ""
-
     ytt = YouTubeTranscriptApi()
-
     for entry in feed.entries[:15]:
         title    = entry.get("title", "Unknown")
         video_id = entry.get("yt_videoid") or entry.get("id", "").split(":")[-1]
-
         if not video_id:
             continue
-
         if video_id == last_id:
             print(f"⏭️  Already ingested: {title} ({video_id}) — nothing new.")
             return None
-
         try:
             ytt.fetch(video_id)
         except Exception as e:
             print(f"⛔  Skipping {title} ({video_id}): {e}")
             continue
-
         print(f"✅ New video: {title} (ID: {video_id})")
         return video_id, title
-
     raise RuntimeError("❌ All 15 RSS entries are restricted or have no transcript available.")
 
 
 def analyze_with_claude(content: str, url: str, today: str) -> str:
-    """
-    Sends content to Claude for intel record extraction.
-
-    Args:
-        content:  Cleaned show notes or transcript text.
-        url:      Source URL (included in user message for context).
-        today:    YYYY-MM-DD date string for date_watched field.
-
-    Returns:
-        Raw Claude output string containing ===INTEL_RECORD=== blocks.
-    """
     print("🧠 Analyzing with Claude (claude-sonnet-4-6)...")
-
     user_message = (
         f"Source URL: {url}\n"
         f"Date Watched: {today}\n\n"
         f"CONTENT:\n{content}\n\n"
         f"[END OF TRANSCRIPT - BEGIN ANALYSIS]"
     )
-
     message = claude.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=16000,
@@ -651,17 +583,12 @@ def analyze_with_claude(content: str, url: str, today: str) -> str:
             {"role": "user", "content": user_message}
         ]
     )
-
     raw_output = message.content[0].text
     record_count = raw_output.count("===INTEL_RECORD_START===")
     print(f"✅ Claude analysis complete — {record_count} record(s) extracted")
     return raw_output
 
 def analyze_with_claude_prompt(content: str, url: str, today: str, prompt: str) -> str:
-    """
-    Same as analyze_with_claude() but accepts a custom system prompt.
-    Used for non-show-notes sources like OTX that need tailored extraction.
-    """
     print("🧠 Analyzing with Claude (claude-sonnet-4-6)...")
     user_message = (
         f"Source URL: {url}\n"
@@ -682,7 +609,6 @@ def analyze_with_claude_prompt(content: str, url: str, today: str, prompt: str) 
 
 
 def write_governance_file(content: str):
-    """Writes Claude output to governance_input.txt for parsing."""
     starts = content.count("===INTEL_RECORD_START===")
     ends   = content.count("===INTEL_RECORD_END===")
     if starts != ends:
@@ -694,10 +620,6 @@ def write_governance_file(content: str):
 
 
 def load_mock_data() -> str:
-    """
-    Test Mode only. Reads existing governance_input.txt as mock Claude output.
-    Costs $0.00. Tests the full Notion push pipeline without any API calls.
-    """
     mock_path = SCRIPT_DIR / "governance_input.txt"
     if not mock_path.exists():
         raise FileNotFoundError(
@@ -711,7 +633,6 @@ def load_mock_data() -> str:
 
 
 def extract_video_id(url: str) -> str:
-    """Handles all common YouTube URL formats. Retained for non-blocked sources."""
     patterns = [
         r"(?:v=)([a-zA-Z0-9_-]{11})",
         r"(?:youtu\.be/)([a-zA-Z0-9_-]{11})",
@@ -725,20 +646,8 @@ def extract_video_id(url: str) -> str:
     raise ValueError(f"❌ Could not extract video ID from: {url}")
 
 def get_otx_pulses(api_key: str, lookback_hours: int = 24) -> list:
-    """
-    Fetches relevant threat intelligence pulses from AlienVault OTX.
-    
-    Three-gate filter before Claude sees anything:
-      Gate 1 — Time: only pulses from last lookback_hours
-      Gate 2 — Relevance: only pulses matching DARKSWORD focus tags
-      Gate 3 — Deduplication: no repeat pulse IDs
-    
-    Returns:
-        List of dicts with keys: name, description, url, tags, indicators
-    """
     from OTXv2 import OTXv2
     from datetime import datetime, timedelta
-
     RELEVANT_TAGS = {
         'ransomware', 'apt', 'nation-state',
         'critical-infrastructure', 'cisa',
@@ -746,38 +655,26 @@ def get_otx_pulses(api_key: str, lookback_hours: int = 24) -> list:
         'malware', 'vulnerability', 'exploit',
         'lateral-movement', 'credential-access'
     }
-
     print(f"📡 Fetching OTX pulses (last {lookback_hours}hrs)...")
-
-    # Gate 1 — Time filter
     since = (datetime.utcnow() - timedelta(hours=lookback_hours)).strftime("%Y-%m-%dT%H:%M:%S")
     try:
         otx    = OTXv2(api_key)
         pulses = otx.getall(modified_since=since)
     except Exception as e:
         raise RuntimeError(f"❌ OTX fetch failed: {e}")
-
     print(f"   Raw pulses last {lookback_hours}hrs: {len(pulses)}")
-
-    # Gate 2 — Relevance filter
     def is_relevant(pulse):
         pulse_tags = {t.lower() for t in pulse.get('tags', [])}
         return bool(pulse_tags & RELEVANT_TAGS)
-
     relevant = [p for p in pulses if is_relevant(p)]
     print(f"   After relevance filter: {len(relevant)}")
-
-    # Gate 3 — Deduplication
     seen_ids = set()
     unique   = []
     for p in relevant:
         if p['id'] not in seen_ids:
             seen_ids.add(p['id'])
             unique.append(p)
-
     print(f"   After deduplication: {len(unique)} pulse(s) queued for Claude")
-
-    # Format for analyze_with_claude()
     results = []
     for p in unique:
         content = (
@@ -793,22 +690,14 @@ def get_otx_pulses(api_key: str, lookback_hours: int = 24) -> list:
             "url":     f"https://otx.alienvault.com/pulse/{p['id']}",
             "name":    p.get('name', 'OTX Pulse'),
         })
-
     return results
 
 def get_transcript(url: str) -> str:
-    """
-    Fetches YouTube audio and transcribes using OpenAI Whisper.
-    Retained for non-blocked sources (Barricade, Cybernews, etc.)
-    NOTE: Blocked at network/IP level for Simply Cyber — use get_show_notes().
-    """
     import tempfile
     import whisper
     import yt_dlp
-
     print("📡 Downloading audio for transcription...")
     video_id = extract_video_id(url)
-
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = f"{tmpdir}/{video_id}.mp3"
         ydl_opts = {
@@ -823,24 +712,17 @@ def get_transcript(url: str) -> str:
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-
         print("🎙️ Transcribing with Whisper (this may take 1-2 minutes)...")
         model = whisper.load_model("base")
         result = model.transcribe(audio_path + ".mp3")
         raw_text = result["text"]
-
     clean_text = scrub(raw_text)
     print(f"✅ Transcript ready: {len(clean_text.split()):,} words")
     return clean_text
 
 
 def get_barricade_intel(url: str) -> str:
-    """
-    Fetches a YouTube transcript via YouTubeTranscriptApi for Barricade Cyber
-    (and other non-blocked sources). Avoids yt-dlp/Whisper/FFmpeg entirely.
-    """
     from youtube_transcript_api import YouTubeTranscriptApi, VideoUnplayable, TranscriptsDisabled
-
     video_id = extract_video_id(url)
     print(f"📡 Fetching transcript for video {video_id}...")
     ytt = YouTubeTranscriptApi()
@@ -857,23 +739,13 @@ def get_barricade_intel(url: str) -> str:
 
 
 def get_gemini_transcript(url: str) -> str:
-    """
-    Transcribes a YouTube video using the Gemini API (gemini-2.0-flash).
-    Accepts YouTube URLs natively — no audio download, no yt-dlp, no Whisper.
-    Use for restricted or long-form videos that YouTubeTranscriptApi cannot access.
-    Requires GEMINI_API_KEY in .env.
-    """
     from google import genai
     from google.genai import types
-
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
         raise RuntimeError("❌ GEMINI_API_KEY not set in .env")
-
     client = genai.Client(api_key=gemini_key)
-
     print(f"📡 Sending to Gemini for transcription: {url}")
-
     response = client.models.generate_content(
         model="gemini-2.0-flash",
         contents=[
@@ -885,7 +757,6 @@ def get_gemini_transcript(url: str) -> str:
             ),
         ]
     )
-
     raw_text = response.text
     clean_text = scrub(raw_text)
     print(f"✅ Gemini transcript ready: {len(clean_text.split()):,} words")
@@ -897,13 +768,13 @@ def get_gemini_transcript(url: str) -> str:
 
 def load_cmmc_cache(retries: int = 3, delay: int = 15):
     """
-    Loads CMMC Control IDs into memory for instant relation mapping.
+    Loads CMMC Control IDs into memory indexed by NIST 800-171 Ref.
     Retries up to 3 times on rate limit before giving up.
     """
     if not CMMC_DB_ID:
         print("⚠️  CMMC_DB_ID not configured — skipping cache")
         return
-    
+
     for attempt in range(1, retries + 1):
         print(f"📡 Loading CMMC cache (attempt {attempt}/{retries})...")
         try:
@@ -915,15 +786,17 @@ def load_cmmc_cache(retries: int = 3, delay: int = 15):
                     kwargs["start_cursor"] = cursor
                 res = notion.databases.query(**kwargs)
                 for page in res.get("results", []):
-                    title_props = page["properties"].get("Name", {}).get("title", [])
-                    if title_props:
-                        cid = title_props[0].get("plain_text", "").strip()
-                        if cid:
-                            CMMC_CACHE[normalize_cid(cid)] = page["id"]
+                    props     = page["properties"]
+                    nist_prop = props.get("NIST 800-171 Ref", {}).get("rich_text", [])
+                    nist_ref  = nist_prop[0].get("plain_text", "").strip() if nist_prop else ""
+                    mat_prop  = props.get("Maturity", {}).get("select") or {}
+                    maturity  = mat_prop.get("name", "").strip()
+                    if nist_ref:
+                        CMMC_CACHE[nist_ref].append((maturity, page["id"]))
                 has_more = res.get("has_more", False)
                 cursor   = res.get("next_cursor")
             print(f"✅ CMMC cache loaded: {len(CMMC_CACHE)} controls")
-            return  # Success — exit the retry loop
+            return
         except Exception as e:
             err_str = str(e).lower()
             if "unauthorized" in err_str or "401" in err_str or "invalid_token" in err_str:
@@ -939,10 +812,11 @@ def load_cmmc_cache(retries: int = 3, delay: int = 15):
 def update_compliance_status(control_ids: List[str], log_page_url: str):
     """Writes back to CMMC database to mark evidence."""
     for cid in control_ids:
-        if normalize_cid(cid) in CMMC_CACHE:
+        page_id = resolve_control(cid)
+        if page_id:
             try:
                 notion.pages.update(
-                    page_id=CMMC_CACHE[normalize_cid(cid)],
+                    page_id=page_id,
                     properties={
                         "Status":        {"select": {"name": "Evidence Pending"}},
                         "Last Evidence": {"url": log_page_url}
@@ -978,7 +852,7 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
 
     if record_exists(record_id):
         print(f"⏭️  {record_id} already exists — skipping")
-        return True  # not a failure; push_all must not log to failed_records.txt
+        return True
 
     props = {
         "Title":        {"title": [{"text": {"content": page_title}}]},
@@ -1018,9 +892,9 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
         rels   = []
         missed = []
         for cid in cids_raw:
-            norm = normalize_cid(cid)
-            if norm in CMMC_CACHE:
-                rels.append({"id": CMMC_CACHE[norm]})
+            pid = resolve_control(cid)
+            if pid:
+                rels.append({"id": pid})
             else:
                 missed.append(cid)
         if rels:
@@ -1033,7 +907,6 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
     # === Learning Plan Relation (Auto-detect from content) ===
     linked_weeks = set()
 
-    # 1. Explicit override from record
     learning_raw = (
         record.get("GRC_Learning_Plan_All_Phases", "") or
         record.get("learning_phase", "")
@@ -1043,13 +916,11 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
         if phase_key in LEARNING_CACHE:
             linked_weeks.add(phase_key)
 
-    # 2. Auto-map from control_domains
     domains_raw = record.get("control_domains", "") or ""
     for domain in [d.strip() for d in domains_raw.split(",")]:
         for week in DOMAIN_TO_WEEKS.get(domain, []):
             linked_weeks.add(week)
 
-    # 3. Auto-map from intel_category
     cats_raw = record.get("intel_category", "") or ""
     for cat in [c.strip() for c in cats_raw.split(",")]:
         for week in CATEGORY_TO_WEEKS.get(cat, []):
@@ -1245,7 +1116,7 @@ def main():
             print(f"❌ Barricade RSS fetch failed: {e}")
             sys.exit(1)
         if result is None:
-            return  # already ingested; exit cleanly
+            return
         video_id, _title = result
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
