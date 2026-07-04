@@ -57,7 +57,18 @@ question is actually answered.
   format, for the same reason Gap 2 back-ported it into SENTINEL.md:
   a fix that only exists in a dated handover note doesn't survive contact
   with a fresh session.
-
+- **CPE Schema Draft (upstream location)** — `C:\Work\GRC\learning_repo` is
+  where the CPE prompt pair (`cpe_prompt_claude.txt` / `cpe_prompt_chatgpt.txt`)
+  and their loader (`filter_dtb_transcript(legacy).py`) are actively drafted
+  and iterated — a sibling repo, not nested under darksword. As of commit
+  `f373998` (2026-07-03) that repo resolves three items open in
+  `handover_2026-06-15.md` (cpe_credits math, content_category status,
+  GRC_Learning_Plan_All_Phases en-dash bug) — see
+  `learning_repo/docs/handovers/2026-07-03_HANDOVER_cpe_schema_draft.md`.
+  **Not yet ported into darksword's Gate-2-frozen copy.** ARCHITECT
+  sign-off required before promotion — verify the Notion DB schema has
+  matching properties for the new fields before any port.
+  
 ---
 
 ## Key Files
