@@ -59,17 +59,41 @@ DARKSWORD_RECON_DevSecOps_Review.md                      # security doc — out 
 
 ### Dependencies (`requirements.txt`)
 
-Key packages and their purpose:
+Live pinned packages (verified against `requirements.txt` and the shared venv
+at `C:\Work\GRC\.venv`, 2026-07-03):
 
-| Package | Purpose |
-|---------|---------|
-| `anthropic` | Claude API client — main classification engine |
-| `notion-client` | Notion API SDK |
-| `feedparser` | RSS feed parsing (Choice 5 RSS auto-detect) |
-| `google-genai` | Gemini API client (Choice 8) — note: `google.genai`, NOT `google.generativeai` |
-| `python-dotenv` | `.env` loader |
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `anthropic` | `0.105.2` | Claude API client — main classification engine. Was missing from the manifest until 2026-07-03 (working in venv the whole time; manifest-only gap, fixed same day). |
+| `notion-client` | `2.2.1` | Notion API SDK |
+| `python-dotenv` | `1.2.2` | `.env` loader |
+| `feedparser` | `6.0.12` | RSS feed parsing (Choice 5 RSS auto-detect) |
+| `google-genai` | `2.8.0` | Gemini API client (Choice 8) — note: `google.genai`, NOT `google.generativeai` |
 
-`google-generativeai` was replaced by `google-genai` (SDK migration, commit `2a35fa4`). If both appear in `requirements.txt`, remove `google-generativeai`.
+`google-generativeai` legacy package confirmed clean — not present in the
+current manifest, no cleanup action needed.
+
+**Environment gotcha (2026-07-03):** this project has no nested `.venv` —
+the real environment is the shared venv one level up at
+`C:\Work\GRC\.venv`. Ambient `pip`/`python` in a fresh Git Bash session can
+resolve to global `C:\Python310\...` instead, even when the prompt shows
+`(.venv)` — PATH-ordering/stale-prompt seam, not a real environment problem.
+Verify with the venv's binary directly when in doubt:
+`/c/Work/GRC/.venv/Scripts/python.exe -m pip show <package>`. This caused a
+false "anthropic is missing" alarm tonight before being traced to the wrong
+interpreter, not a real gap.
+
+**Audio-ingest stack (torch/CUDA/faster-whisper) — intentionally NOT yet
+pinned in `requirements.txt`, pending AO/ARCHITECT confirmation this is
+deliberate gating and not an oversight.** Per `boards/BOARD.md`: exact pins
+used in the dev build were `torch==2.5.1+cu124` (exact local-version string,
+required — `--extra-index-url` alone resolves to the wrong CPU-only build)
+and `sympy==1.13.1` (confirmed genuine torch-pinned dependency, not a
+regression). `--auto` audio path is code-complete but NOT enabled (Call-1
+fabrication defect open, see ARCHITECT.md). Recommend adding these pins to
+`requirements.txt` once that defect is resolved and the path is enabled —
+until then, a fresh clone correctly cannot run the audio path, which may be
+the intended state. Confirm before treating this as resolved.
 
 ### Commit signing
 
