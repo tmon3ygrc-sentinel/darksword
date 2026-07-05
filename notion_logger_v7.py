@@ -52,10 +52,12 @@ load_dotenv(dotenv_path=SCRIPT_DIR / ".env")
 # Run with: python notion_logger_v7.py --auto-otx                     (non-interactive OTX pipeline only)
 # Run with: python notion_logger_v7.py --auto-otx --lookback-hours 48 (backfill missed runs, max 72)
 # Run with: python notion_logger_v7.py --auto-barricade               (non-interactive Barricade Cyber pipeline)
+# Run with: python notion_logger_v7.py --push-reviewed                (push AO-reviewed audio-ingest records; archives pending file after)
 TEST_MODE          = "--test"           in sys.argv
 AUTO_MODE          = "--auto"           in sys.argv
 AUTO_OTX_MODE      = "--auto-otx"      in sys.argv
 AUTO_BARRICADE_MODE = "--auto-barricade" in sys.argv
+PUSH_REVIEWED_MODE = "--push-reviewed" in sys.argv
 
 def _parse_lookback_hours() -> int:
     for i, arg in enumerate(sys.argv):
@@ -83,6 +85,14 @@ if AUTO_MODE and AUTO_BARRICADE_MODE:
     raise ValueError("❌ --auto and --auto-barricade are mutually exclusive.")
 if AUTO_OTX_MODE and AUTO_BARRICADE_MODE:
     raise ValueError("❌ --auto-otx and --auto-barricade are mutually exclusive.")
+if TEST_MODE and PUSH_REVIEWED_MODE:
+    raise ValueError("❌ --test and --push-reviewed are mutually exclusive.")
+if AUTO_MODE and PUSH_REVIEWED_MODE:
+    raise ValueError("❌ --auto and --push-reviewed are mutually exclusive.")
+if AUTO_OTX_MODE and PUSH_REVIEWED_MODE:
+    raise ValueError("❌ --auto-otx and --push-reviewed are mutually exclusive.")
+if AUTO_BARRICADE_MODE and PUSH_REVIEWED_MODE:
+    raise ValueError("❌ --auto-barricade and --push-reviewed are mutually exclusive.")
 
 NOTION_TOKEN      = os.getenv("NOTION_TOKEN")
 DATABASE_ID       = os.getenv("DATABASE_ID")
@@ -1024,6 +1034,52 @@ def push_all(records: list, source_label: str, url: str):
     else:
         print(f"✅ All {len(records)} record(s) pushed successfully.")
 
+PENDING_REVIEW_FILE = SCRIPT_DIR / "audio_review_pending.txt"
+
+
+def write_pending_review(records: list, url: str) -> None:
+    """Appends audio-ingest records to the pending-review file for manual AO confirmation.
+    Append, not overwrite — a second thin-notes day landing before the first
+    pending batch is reviewed must not clobber it; both must survive until
+    --push-reviewed processes them."""
+    if not records:
+        print("⚠️  No records to hold for review — nothing written.")
+        return
+    with open(PENDING_REVIEW_FILE, "a", encoding="utf-8") as f:
+        for r in records:
+            row = dict(r)
+            if str(row.get("url", "")).strip().lower() in ("", "none", "unknown"):
+                row["url"] = url
+            f.write("===INTEL_RECORD_START===\n")
+            for k, v in row.items():
+                f.write(f"{k}:: {v}\n")
+            f.write("===INTEL_RECORD_END===\n\n")
+    print(f"✅ {len(records)} record(s) appended to {PENDING_REVIEW_FILE.name} for manual review.")
+
+
+def confirm_and_push_reviewed() -> None:
+    """Pushes AO-reviewed audio-ingest records, grouped by each record's own
+    url (so a stacked second thin-notes day keeps its own episode url), then
+    archives the pending file so a repeat run does not double-push."""
+    if not PENDING_REVIEW_FILE.exists():
+        print(f"✅ No pending review file found ({PENDING_REVIEW_FILE.name}) — nothing to push.")
+        return
+    records = parse_records(PENDING_REVIEW_FILE)
+    if not records:
+        print("⚠️  Pending review file exists but contains no valid records — check formatting.")
+        return
+    groups: Dict[str, list] = defaultdict(list)
+    for r in records:
+        groups[r.get("url", "unknown")].append(r)
+    for grp_url, group in groups.items():
+        print(f"\n📋 Pushing {len(group)} reviewed record(s) for {grp_url}...")
+        push_all(group, "Simply Cyber Daily Threat Brief", grp_url)
+    archive_path = PENDING_REVIEW_FILE.with_name(
+        f"{PENDING_REVIEW_FILE.stem}_pushed_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+    )
+    PENDING_REVIEW_FILE.replace(archive_path)
+    print(f"✅ Pending review file archived → {archive_path.name}")
+
 # ===================================================================
 # 10. MAIN
 # ===================================================================
@@ -1039,11 +1095,17 @@ def main():
         print("     🤖 AUTO-OTX        |  AlienVault OTX → Claude → Notion")
     elif AUTO_BARRICADE_MODE:
         print("     🤖 AUTO-BARRICADE  |  Barricade Cyber → Claude → Notion")
+    elif PUSH_REVIEWED_MODE:
+        print("     🔎 PUSH-REVIEWED  |  audio_review_pending.txt → Notion")
     else:
         print("     🔴 LIVE MODE  |  API Connected")
     print("="*60)
 
     load_cmmc_cache()
+
+    if PUSH_REVIEWED_MODE:
+        confirm_and_push_reviewed()
+        return
 
     if AUTO_MODE:
         print("\n⚡ Auto-run: Choice 5 (RSS date detection → Show Notes → Notion)")
@@ -1063,6 +1125,7 @@ def main():
             sys.exit(1)
 
         word_count = len(content.split())
+        source_is_audio_ingest = False
         if word_count < 500:
             print(f"⚠️  Show notes too short ({word_count} words) — attempting audio ingest.")
             if not transistor_url:
@@ -1072,6 +1135,7 @@ def main():
                 raw_transcript = get_audio_transcript(transistor_url)
                 content = extract_stories_from_transcript(raw_transcript, transistor_url, date.today().isoformat())
                 url = transistor_url
+                source_is_audio_ingest = True
             except (RuntimeError, ValueError) as e:
                 print(f"❌ Audio ingest failed: {e} — exiting. Manual ingest required.")
                 sys.exit(1)
@@ -1083,14 +1147,21 @@ def main():
             print(f"❌ Auto pipeline failed: {e}")
             sys.exit(1)
         records = parse_records(SCRIPT_DIR / "governance_input.txt")
-        print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
-        push_all(records, "Simply Cyber Daily Threat Brief", url)
-        if not records and word_count >= 500:
-            print(
-                f"\n⚠️  WARNING: 0 records pushed despite {word_count}-word show notes. "
-                "Claude ran but the parser found no valid INTEL_RECORD blocks. "
-                "Check governance_input.txt and review Claude output for formatting issues."
-            )
+
+        if source_is_audio_ingest:
+            write_pending_review(records, url)
+            print(f"⏸  {len(records)} audio-ingest record(s) awaiting manual review — "
+                  f"not pushed. Review {PENDING_REVIEW_FILE.name}, then run with "
+                  f"--push-reviewed to push after confirming.")
+        else:
+            print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
+            push_all(records, "Simply Cyber Daily Threat Brief", url)
+            if not records and word_count >= 500:
+                print(
+                    f"\n⚠️  WARNING: 0 records pushed despite {word_count}-word show notes. "
+                    "Claude ran but the parser found no valid INTEL_RECORD blocks. "
+                    "Check governance_input.txt and review Claude output for formatting issues."
+                )
         return
 
     if AUTO_OTX_MODE:
