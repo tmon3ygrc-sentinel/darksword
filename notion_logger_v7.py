@@ -33,6 +33,7 @@ import time
 import anthropic
 import feedparser
 import requests
+import pyperclip
 from datetime import date
 from pathlib import Path
 from typing import List, Dict
@@ -789,6 +790,26 @@ def get_gemini_transcript(url: str) -> str:
     print(f"✅ Gemini transcript ready: {len(clean_text.split()):,} words")
     return clean_text
 
+
+def ingest_manual_transcript(raw_transcript: str, source_url: str) -> None:
+    """Manual-paste ingest path. Supersedes Choice 2's old direct
+    parse_records()+push_all() flow. Mirrors the audio-ingest path's full
+    call chain — Call 1 then Call 2 — because extract_stories_from_transcript()
+    only produces plain-text story prose, not INTEL_RECORD-tagged output."""
+    story_summary = extract_stories_from_transcript(
+        raw_transcript, source_url, date.today().isoformat()
+    )
+    raw_output = analyze_with_claude(
+        story_summary, source_url, date.today().isoformat()
+    )
+    write_governance_file(raw_output)
+    records = parse_records(SCRIPT_DIR / "governance_input.txt")
+    write_pending_review(records, source_url)
+    print(f"⏸  {len(records)} manual-paste record(s) awaiting manual review — "
+          f"not pushed. Review {PENDING_REVIEW_FILE.name}, then run with "
+          f"--push-reviewed to push after confirming.")
+
+
 # ===================================================================
 # 7. NOTION FUNCTIONS
 # ===================================================================
@@ -1220,7 +1241,7 @@ def main():
 
     while True:
         print("\n1. Autonomous Pipeline  (Show Notes → Claude → Notion)")
-        print("2. Manual Pipeline      (governance_input.txt → Notion)")
+        print("2. Manual Transcript Ingest (clipboard → Claude → review-gate)")
         if TEST_MODE:
             print("3. Test Pipeline        (Mock data → Notion) ← YOU ARE HERE")
         print("4. OTX Pipeline         (AlienVault → Claude → Notion)")
@@ -1252,14 +1273,20 @@ def main():
             push_all(records, "Simply Cyber Daily Threat Brief", url)
 
         elif choice == "2":
+            if TEST_MODE:
+                print("❌ Manual transcript ingest disabled in --test.")
+                continue
             while True:
                 url = input("Source URL: ").strip()
                 if url:
                     break
                 print("⚠️  URL cannot be empty — records will have no source attribution. Enter a URL.")
-            input("Save AI output to governance_input.txt then press ENTER...")
-            records = parse_records(SCRIPT_DIR / "governance_input.txt")
-            push_all(records, "Simply Cyber Daily Threat Brief", url)
+            print("\n📄 Reading transcript from clipboard...")
+            raw_transcript = pyperclip.paste()
+            if not raw_transcript or len(raw_transcript) < 50:
+                print("❌ Clipboard is empty or contains junk data — nothing to ingest.")
+                continue
+            ingest_manual_transcript(raw_transcript, url)
 
         elif choice == "3" and TEST_MODE:
             while True:
