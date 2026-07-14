@@ -56,3 +56,8 @@ backups/
 
 # Security / attack-surface doc — keep out of public git history
 DARKSWORD_RECON_DevSecOps_Review.md
+
+# Timestamped backup/working-copy files (convention: <name>.<description>-<timestamp>)
+.env.*
+*backup*
+*.pre-*
