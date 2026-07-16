@@ -318,6 +318,9 @@ impacted_identity_provider::
 - **identity_impact**: Who is impacted (comma-separated). Values: workforce-accounts, administrative-roles, system-administrators, security-operations, service-accounts, non-human-identities, executive-accounts, third-party-vendors, none, unknown.
 - **tags**: ALL MITRE IDs (lowercase) AND descriptive keywords (lowercase-hyphenated).
 - **story_type**: MUST be exactly one of: incident, vulnerability, advisory, strategic, legal-regulatory.
+- **threat_actor**: Name(s) of the threat actor(s) or group(s), comma-separated if multiple. Proper noun only, exactly as commonly reported (e.g., "LockBit", "Salt Typhoon", "ShinyHunters") — one name per comma-separated entry. If attribution is not to a named actor, use exactly one of: unknown, unattributed, nation-state, state-sponsored, e-crime, insider, hacktivist. Do NOT add parenthetical commentary or confidence/sourcing qualifiers to this field (no "(unconfirmed)", "(suspected)", "(sanctioned)", "(multiple subscribers)", etc.) — put any attribution confidence, sourcing, or legal/sanctions caveats in key_takeaways instead.
+- **target_sector**: Industry/sector(s) targeted, comma-separated if multiple. Values: healthcare, financial-services, government, education, energy, critical-infrastructure, technology, telecommunications, retail, manufacturing, defense, legal, media, non-profit, consumer, unknown. Do NOT add parenthetical commentary — use "unknown" if unclear.
+- **key_takeaways**: 2-4 analyst sentences (plain text, no bullet characters) capturing the most actionable insights. Include any attribution confidence, sourcing, or qualifying caveats here (e.g., unconfirmed attribution, sanctions status, subscriber/victim counts) rather than embedding them in threat_actor or target_sector.
 - **executive_summary**: Exactly 3 sentences.
 - **dfir_phase**: initial-triage, containment, eradication, recovery. Use "None" if not active incident.
 - **investigation_type**: threat-hunt, incident-response, vulnerability-assessment, compliance-review. Use "None" if not applicable.
@@ -388,9 +391,35 @@ def to_select(val: str) -> dict:
     """Builds a Notion select block from a string."""
     return {"name": str(val).strip()} if val else None
 
+def split_top_level(val: str) -> list:
+    """
+    Splits a string on commas at paren-depth 0 only — a comma inside an
+    open (...) is part of the enclosing token, not a delimiter. Unbalanced
+    parens degrade safely: depth never goes below 0, and an unclosed "("
+    just keeps the rest of the string in the current token instead of
+    splitting it further.
+    """
+    items = []
+    current = []
+    depth = 0
+    for ch in val:
+        if ch == "(":
+            depth += 1
+            current.append(ch)
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            items.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    items.append("".join(current))
+    return items
+
 def to_multi(val: str) -> list:
-    """Splits a comma-separated string into Notion multi_select blocks."""
-    items = [x.strip() for x in str(val).split(",")]
+    """Splits a string into Notion multi_select blocks on top-level commas only."""
+    items = [x.strip() for x in split_top_level(str(val))]
     return [{"name": i} for i in items if i]
 
 def scrub(text: str) -> str:
