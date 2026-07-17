@@ -54,11 +54,13 @@ load_dotenv(dotenv_path=SCRIPT_DIR / ".env")
 # Run with: python notion_logger_v7.py --auto-otx --lookback-hours 48 (backfill missed runs, max 72)
 # Run with: python notion_logger_v7.py --auto-barricade               (non-interactive Barricade Cyber pipeline)
 # Run with: python notion_logger_v7.py --push-reviewed                (push AO-reviewed audio-ingest records; archives pending file after)
+# Run with: python notion_logger_v7.py --push-corrections             (interactive: apply AO-reviewed field-level corrections to already-live records; record_corrections.txt)
 TEST_MODE          = "--test"           in sys.argv
 AUTO_MODE          = "--auto"           in sys.argv
 AUTO_OTX_MODE      = "--auto-otx"      in sys.argv
 AUTO_BARRICADE_MODE = "--auto-barricade" in sys.argv
 PUSH_REVIEWED_MODE = "--push-reviewed" in sys.argv
+PUSH_CORRECTIONS_MODE = "--push-corrections" in sys.argv
 
 def _parse_lookback_hours() -> int:
     for i, arg in enumerate(sys.argv):
@@ -94,6 +96,16 @@ if AUTO_OTX_MODE and PUSH_REVIEWED_MODE:
     raise ValueError("❌ --auto-otx and --push-reviewed are mutually exclusive.")
 if AUTO_BARRICADE_MODE and PUSH_REVIEWED_MODE:
     raise ValueError("❌ --auto-barricade and --push-reviewed are mutually exclusive.")
+if TEST_MODE and PUSH_CORRECTIONS_MODE:
+    raise ValueError("❌ --test and --push-corrections are mutually exclusive.")
+if AUTO_MODE and PUSH_CORRECTIONS_MODE:
+    raise ValueError("❌ --auto and --push-corrections are mutually exclusive.")
+if AUTO_OTX_MODE and PUSH_CORRECTIONS_MODE:
+    raise ValueError("❌ --auto-otx and --push-corrections are mutually exclusive.")
+if AUTO_BARRICADE_MODE and PUSH_CORRECTIONS_MODE:
+    raise ValueError("❌ --auto-barricade and --push-corrections are mutually exclusive.")
+if PUSH_REVIEWED_MODE and PUSH_CORRECTIONS_MODE:
+    raise ValueError("❌ --push-reviewed and --push-corrections are mutually exclusive.")
 
 NOTION_TOKEN      = os.getenv("NOTION_TOKEN")
 DATABASE_ID       = os.getenv("DATABASE_ID")
@@ -980,6 +992,54 @@ def count_existing_record_ids_with_prefix(prefix: str) -> int:
     return len(results)
 
 
+def find_record_page(record_id: str) -> dict | None:
+    """Looks up the live Notion page for a record_id, reusing the exact same
+    query shape record_exists()/load_cmmc_cache() already use — no new query
+    type, no new API surface. Returns the full page object (so callers get
+    both the page id and its current property values from one query, not a
+    separate fetch) or None if no matching page exists. Fails CLOSED like
+    record_exists() — raises DedupCheckError after retries exhausted rather
+    than assuming 'not found' on a real query failure.
+    See boards/sentinel_update_existing_record_design.md, section 3."""
+    if not record_id or str(record_id).lower() in ("unknown", "none", "empty", "n/a"):
+        return None
+    results = _notion_query_all({"property": "record_id", "rich_text": {"equals": record_id}})
+    return results[0] if results else None
+
+
+def _live_field_value_display(page: dict, field: str) -> str:
+    """Renders a Notion page property's current live value as a plain string
+    for the before/after correction diff — the read-side mirror of
+    to_text()/to_multi()/to_select()."""
+    prop = page.get("properties", {}).get(field)
+    if prop is None:
+        return "(property not found on page)"
+    if field in RICH_TEXT_FIELDS:
+        return "".join(t.get("plain_text", "") for t in prop.get("rich_text", []))
+    if field in MULTI_SELECT_FIELDS:
+        return ", ".join(o.get("name", "") for o in prop.get("multi_select", []))
+    if field in SELECT_FIELDS:
+        sel = prop.get("select")
+        return sel.get("name", "") if sel else ""
+    return "(unsupported field type for display)"
+
+
+def _build_correction_payload(field: str, new_value: str) -> dict | None:
+    """Builds the single-property notion.pages.update payload for a
+    correction, reusing the exact same to_text()/to_multi()/to_select()
+    serializers push_record() already uses for the same fields — no new
+    serialization logic. Returns None for a field type this mechanism
+    doesn't know how to write (caller must treat that as unsupported, not
+    silently skip the property)."""
+    if field in RICH_TEXT_FIELDS:
+        return {field: {"rich_text": to_text(new_value)}}
+    if field in MULTI_SELECT_FIELDS:
+        return {field: {"multi_select": to_multi(new_value)}}
+    if field in SELECT_FIELDS:
+        return {field: {"select": to_select(new_value)}}
+    return None
+
+
 SOURCE_SLUG_MAP = {
     "Simply Cyber Daily Threat Brief": "simplycyber",
     "Barricade Cyber": "barricadecyber",
@@ -1167,6 +1227,42 @@ def parse_records(file_path: Path) -> List[dict]:
     return records
 
 
+CORRECTIONS_FILE = SCRIPT_DIR / "record_corrections.txt"
+
+
+def parse_corrections(file_path: Path) -> List[dict]:
+    """Extracts field-level corrections from a corrections file. Same
+    block-delimiter parsing approach as parse_records() (one regex findall
+    over START/END markers, then `key:: value` lines with multi-line
+    continuation) — different marker pair and required-key set, not a new
+    parsing paradigm. A block missing record_id/field/new_value is dropped
+    with a warning rather than silently producing a partial correction."""
+    if not file_path.exists():
+        return []
+    content = file_path.read_text(encoding="utf-8")
+    blocks = re.findall(
+        r'===RECORD_CORRECTION_START===(.*?)===RECORD_CORRECTION_END===',
+        content,
+        re.DOTALL
+    )
+    corrections = []
+    for block in blocks:
+        raw = {}
+        current_key = None
+        for line in block.strip().split('\n'):
+            if '::' in line:
+                k, v = line.split('::', 1)
+                current_key = k.strip()
+                raw[current_key] = v.strip()
+            elif current_key and line.strip():
+                raw[current_key] += ' ' + line.strip()
+        if raw.get('record_id') and raw.get('field') and raw.get('new_value'):
+            corrections.append(raw)
+        else:
+            print(f"⚠️  Skipping malformed correction block (missing record_id/field/new_value): {raw}")
+    return corrections
+
+
 def push_all(records: list, source_label: str, url: str) -> int:
     """Pushes all records and saves any failures for retry.
     Returns the count of failures specifically caused by a dedup-check
@@ -1251,6 +1347,128 @@ def confirm_and_push_reviewed() -> None:
     PENDING_REVIEW_FILE.replace(archive_path)
     print(f"✅ Pending review file archived → {archive_path.name}")
 
+
+# Low-friction path per boards/sentinel_update_existing_record_design.md
+# section 4 — free-text/prose fields most likely to carry a factual
+# fabrication. Anything outside this set still goes through, just with an
+# explicit warning banner first (process guard, not a code-level block).
+IN_SCOPE_CORRECTION_FIELDS = {
+    "key_takeaways", "executive_summary", "operational_relevance",
+    "identity_impact", "detection_opportunities",
+}
+
+# Fields named in the approved design that turn out NOT to be persisted as
+# their own live Notion property, discovered during this build (not assumed
+# from the design doc alone) — there is nothing live to correct for these,
+# so they're refused with an explanation rather than silently producing an
+# empty/misleading diff.
+CORRECTION_FIELD_UNAVAILABLE = {
+    "title": (
+        "'title' is never persisted as its own Notion property — push_record() "
+        "discards the LLM's title:: output entirely (it's in SKIP_FIELDS). The "
+        "live page's Title is auto-generated from source_label + record_id, not "
+        "analyst content, so there is no live field here to correct."
+    ),
+}
+
+
+def _confirm(prompt: str) -> bool:
+    """Interactive y/n gate. Matches this codebase's existing input()
+    convention. Blank or anything other than a leading 'y'/'yes' is treated
+    as a no — never a default-yes, since this gates a live production write."""
+    ans = input(prompt).strip().lower()
+    return ans in ("y", "yes")
+
+
+def push_corrections() -> None:
+    """Applies AO-reviewed field-level corrections to already-live Notion
+    records. Permanently manual/interactive — never wired into any --auto*
+    path, and no batch-apply-without-looking flag exists on purpose. Every
+    correction gets its own before/after diff (current live value vs.
+    new_value) and its own explicit y/n confirmation, then an immediate
+    post-write re-query so the re-verification is part of this command's own
+    output rather than something a human has to remember to do separately.
+    See boards/sentinel_update_existing_record_design.md, sections 2 and 5."""
+    if not CORRECTIONS_FILE.exists():
+        print(f"✅ No corrections file found ({CORRECTIONS_FILE.name}) — nothing to push.")
+        return
+    corrections = parse_corrections(CORRECTIONS_FILE)
+    if not corrections:
+        print("⚠️  Corrections file exists but contains no valid blocks — check formatting.")
+        return
+
+    applied = declined = skipped = 0
+    for i, corr in enumerate(corrections, start=1):
+        record_id = corr["record_id"]
+        field     = corr["field"]
+        new_value = corr["new_value"]
+        reason    = corr.get("reason", "(no reason given)")
+
+        print(f"\n--- Correction {i}/{len(corrections)}: {record_id} · {field} ---")
+
+        if field in CORRECTION_FIELD_UNAVAILABLE:
+            print(f"❌ Cannot correct '{field}': {CORRECTION_FIELD_UNAVAILABLE[field]}")
+            skipped += 1
+            continue
+
+        if field not in IN_SCOPE_CORRECTION_FIELDS:
+            print(
+                "⚠️  FIELD OUTSIDE NORMAL SCOPE — this field has a history of "
+                "independent hand-editing; confirm this correction won't revert "
+                "an unrelated fix."
+            )
+
+        try:
+            page = find_record_page(record_id)
+        except DedupCheckError as e:
+            print(f"❌ Lookup failed for {record_id}: {e}")
+            skipped += 1
+            continue
+
+        if page is None:
+            print(f"❌ No live record found for record_id '{record_id}' — skipping.")
+            skipped += 1
+            continue
+
+        payload = _build_correction_payload(field, new_value)
+        if payload is None:
+            print(f"❌ '{field}' is not a recognized/supported property type for correction — skipping.")
+            skipped += 1
+            continue
+
+        current_value = _live_field_value_display(page, field)
+        print(f"  current:  {current_value}")
+        print(f"  new:      {new_value}")
+        print(f"  reason:   {reason}")
+
+        if not _confirm("  Apply this correction? [y/N]: "):
+            print("  ⏭️  Declined — not applied.")
+            declined += 1
+            continue
+
+        try:
+            notion.pages.update(page_id=page["id"], properties=payload)
+        except Exception as e:
+            print(f"  ❌ Write failed: {e}")
+            skipped += 1
+            continue
+
+        try:
+            verify_page = find_record_page(record_id)
+            verify_value = _live_field_value_display(verify_page, field) if verify_page else "(re-query found no page)"
+        except DedupCheckError as e:
+            print(f"  ⚠️  Write succeeded but re-verification query failed: {e} — check manually.")
+            applied += 1
+            continue
+
+        print(f"  ✅ Applied. Re-verified live value: {verify_value}")
+        applied += 1
+
+    print(
+        f"\n📋 Corrections summary: {applied} applied, {declined} declined, "
+        f"{skipped} skipped (out of {len(corrections)} total)."
+    )
+
 # ===================================================================
 # 10. MAIN
 # ===================================================================
@@ -1268,6 +1486,8 @@ def main():
         print("     🤖 AUTO-BARRICADE  |  Barricade Cyber → Claude → Notion")
     elif PUSH_REVIEWED_MODE:
         print("     🔎 PUSH-REVIEWED  |  audio_review_pending.txt → Notion")
+    elif PUSH_CORRECTIONS_MODE:
+        print("     ✏️  PUSH-CORRECTIONS  |  record_corrections.txt → Notion (interactive diff+confirm)")
     else:
         print("     🔴 LIVE MODE  |  API Connected")
     print("="*60)
@@ -1276,6 +1496,10 @@ def main():
 
     if PUSH_REVIEWED_MODE:
         confirm_and_push_reviewed()
+        return
+
+    if PUSH_CORRECTIONS_MODE:
+        push_corrections()
         return
 
     if AUTO_MODE:
