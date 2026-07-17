@@ -529,7 +529,16 @@ def get_show_notes(target_date: str = None) -> tuple:
     return clean_text, episode_url
 
 
-def get_rss_episode_date() -> tuple[str, str | None, str | None]:
+def _extract_episode_number(title: str) -> int | None:
+    """Pulls the real episode number out of an RSS entry's title text
+    (e.g. 'Top Cyber News NOW – Ep 1172 – ...'). Returns None if the title
+    doesn't carry a recognizable 'Ep NNN' token — callers must treat that
+    as 'no real episode number available', not guess one."""
+    m = re.search(r'Ep\.?\s*(\d{3,5})', title, re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
+
+def get_rss_episode_date() -> tuple[str, str | None, str | None, int | None]:
     FEED_URL = "https://feeds.transistor.fm/simply-cyber"
     print(f"📡 Checking RSS feed for latest episode date: {FEED_URL}...")
     feed = feedparser.parse(FEED_URL)
@@ -543,6 +552,7 @@ def get_rss_episode_date() -> tuple[str, str | None, str | None]:
     if not parsed:
         raise RuntimeError("❌ No pubDate found in latest feed entry.")
     date_str = f"{parsed.tm_year:04d}-{parsed.tm_mon:02d}-{parsed.tm_mday:02d}"
+    ep_number = _extract_episode_number(title)
     youtube_url = None
     yt_id = latest.get("yt_videoid")
     if yt_id:
@@ -557,14 +567,16 @@ def get_rss_episode_date() -> tuple[str, str | None, str | None]:
     encs = latest.get("enclosures")
     if encs:
         transistor_url = encs[0].get("href")
-    print(f"✅ Latest episode: {title} → {date_str}" + (f" | YouTube: {youtube_url}" if youtube_url else ""))
-    return date_str, youtube_url, transistor_url
+    print(f"✅ Latest episode: {title} → {date_str}"
+          + (f" | Ep {ep_number}" if ep_number else " | ep# unrecognized")
+          + (f" | YouTube: {youtube_url}" if youtube_url else ""))
+    return date_str, youtube_url, transistor_url, ep_number
 
 
 BARRICADE_LAST_FILE = SCRIPT_DIR / "barricade_last_ingested.txt"
 
 
-def get_barricade_latest() -> tuple[str, str] | None:
+def get_barricade_latest() -> tuple[str, str, str | None] | None:
     from youtube_transcript_api import YouTubeTranscriptApi
     FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UCLco-g6YIjhPqOBBR6CUXpg"
     print(f"📡 Checking Barricade Cyber RSS feed...")
@@ -591,8 +603,13 @@ def get_barricade_latest() -> tuple[str, str] | None:
         except Exception as e:
             print(f"⛔  Skipping {title} ({video_id}): {e}")
             continue
-        print(f"✅ New video: {title} (ID: {video_id})")
-        return video_id, title
+        real_date = None
+        parsed = entry.get("published_parsed")
+        if parsed:
+            real_date = f"{parsed.tm_year:04d}-{parsed.tm_mon:02d}-{parsed.tm_mday:02d}"
+        print(f"✅ New video: {title} (ID: {video_id})"
+              + (f" | published: {real_date}" if real_date else " | published date unavailable"))
+        return video_id, title, real_date
     raise RuntimeError("❌ All 15 RSS entries are restricted or have no transcript available.")
 
 
@@ -907,29 +924,119 @@ def update_compliance_status(control_ids: List[str], log_page_url: str):
 # 8. THE ENGINE (PUSH_RECORD)
 # ===================================================================
 
+class DedupCheckError(RuntimeError):
+    """Raised when a Notion dedup/prefix-count query cannot be completed after
+    retries. Callers must fail CLOSED (treat as unresolved, not as 'new') —
+    never assume 'doesn't exist' on a query we couldn't actually run."""
+    pass
+
+
+def _notion_query_all(filter_dict: dict, max_retries: int = 3, delay: float = 1.5) -> list:
+    """Runs a Notion database query to exhaustion (all pages), retrying
+    transient failures. Raises DedupCheckError after max_retries — the
+    caller decides how to fail closed, this never silently returns []
+    on a real failure."""
+    last_exc = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            results = []
+            cursor = None
+            while True:
+                kwargs = {"database_id": DATABASE_ID, "filter": filter_dict, "page_size": 100}
+                if cursor:
+                    kwargs["start_cursor"] = cursor
+                res = notion.databases.query(**kwargs)
+                results.extend(res.get("results", []))
+                if not res.get("has_more"):
+                    break
+                cursor = res.get("next_cursor")
+            return results
+        except Exception as e:
+            last_exc = e
+            if attempt < max_retries:
+                print(f"⚠️  Notion query failed (attempt {attempt}/{max_retries}): {e} — retrying in {delay}s")
+                time.sleep(delay)
+    raise DedupCheckError(f"Notion query failed after {max_retries} attempts: {last_exc}")
+
+
 def record_exists(record_id: str) -> bool:
-    """Query CPE Tracker for an exact record_id match. Returns False for malformed IDs."""
+    """Query CPE Tracker for an exact record_id match. Returns False for
+    malformed IDs. Fails CLOSED on real query failures — raises
+    DedupCheckError after retries exhausted rather than silently assuming
+    'doesn't exist' (the old behavior let a transient API error push a
+    duplicate through unnoticed)."""
     if not record_id or str(record_id).lower() in ("unknown", "none", "empty", "n/a"):
         return False
+    results = _notion_query_all({"property": "record_id", "rich_text": {"equals": record_id}})
+    return len(results) > 0
+
+
+def count_existing_record_ids_with_prefix(prefix: str) -> int:
+    """Counts live records whose record_id starts with prefix. Used to seed
+    the sequential index of a deterministically-constructed record_id so a
+    second same-day run continues numbering instead of colliding with an
+    earlier run's records."""
+    results = _notion_query_all({"property": "record_id", "rich_text": {"starts_with": prefix}})
+    return len(results)
+
+
+SOURCE_SLUG_MAP = {
+    "Simply Cyber Daily Threat Brief": "simplycyber",
+    "Barricade Cyber": "barricadecyber",
+    "AlienVault OTX": "alienvault-otx",
+}
+
+
+def _slugify(text: str) -> str:
+    s = re.sub(r'[^a-z0-9]+', '-', text.strip().lower()).strip('-')
+    return s or "unknown-source"
+
+
+def source_slug(source_label: str) -> str:
+    return SOURCE_SLUG_MAP.get(source_label, _slugify(source_label))
+
+
+def _construct_record_id(source_label: str, real_date: str | None, ep_number,
+                          seq_cache: Dict[str, int]) -> str:
+    """Deterministically builds record_id — the model's own record_id:: output
+    is discarded entirely, this is now the only source of truth for identity.
+    Sequential index is seeded from a live Notion count (via
+    count_existing_record_ids_with_prefix), not a local/in-memory counter, so
+    a second run against the same calendar date continues numbering instead
+    of restarting at -01 and colliding with the first run's records."""
+    slug = source_slug(source_label)
+    if real_date and ep_number:
+        prefix = f"{slug}-ep{int(ep_number):04d}-{real_date}"
+    elif real_date:
+        prefix = f"{slug}-{real_date}"
+    else:
+        prefix = f"{slug}-manual-{date.today().isoformat()}"
+
+    if prefix not in seq_cache:
+        seq_cache[prefix] = count_existing_record_ids_with_prefix(prefix) + 1
+    seq = seq_cache[prefix]
+    seq_cache[prefix] = seq + 1
+    return f"{prefix}-{seq:02d}"
+
+
+def push_record(record: dict, source_label: str, url: str, seq_cache: Dict[str, int],
+                 real_date: str | None = None, ep_number=None) -> tuple[bool, str | None]:
     try:
-        res = notion.databases.query(
-            database_id=DATABASE_ID,
-            filter={"property": "record_id", "rich_text": {"equals": record_id}},
-            page_size=1
-        )
-        return len(res.get("results", [])) > 0
-    except Exception as e:
-        print(f"⚠️  Dedup check failed for {record_id}: {e} — proceeding with push")
-        return False
+        record_id = _construct_record_id(source_label, real_date, ep_number, seq_cache)
+    except DedupCheckError as e:
+        print(f"❌ DEDUP-CHECK-FAILED constructing record_id ({source_label}): {e}")
+        return False, "dedup-check-failed"
 
-
-def push_record(record: dict, source_label: str, url: str) -> bool:
-    record_id  = record.get("record_id", "unknown")
+    record["record_id"] = record_id
     page_title = f"{source_label} - {record_id}"
 
-    if record_exists(record_id):
-        print(f"⏭️  {record_id} already exists — skipping")
-        return True
+    try:
+        if record_exists(record_id):
+            print(f"⏭️  {record_id} already exists — skipping")
+            return True, None
+    except DedupCheckError as e:
+        print(f"❌ DEDUP-CHECK-FAILED for {record_id}: {e}")
+        return False, "dedup-check-failed"
 
     props = {
         "Title":        {"title": [{"text": {"content": page_title}}]},
@@ -1025,10 +1132,10 @@ def push_record(record: dict, source_label: str, url: str) -> bool:
                 log_url
             )
         print(f"✅ Logged: {record_id}")
-        return True
+        return True, None
     except Exception as e:
         print(f"❌ Failed: {record_id} | {e}")
-        return False
+        return False, "push-failed"
 
 # ===================================================================
 # 9. PARSER
@@ -1060,15 +1167,27 @@ def parse_records(file_path: Path) -> List[dict]:
     return records
 
 
-def push_all(records: list, source_label: str, url: str):
-    """Pushes all records and saves any failures for retry."""
+def push_all(records: list, source_label: str, url: str) -> int:
+    """Pushes all records and saves any failures for retry.
+    Returns the count of failures specifically caused by a dedup-check
+    exhausting its retries (as opposed to a real push failure) — 0 when
+    none occurred — so unattended (--auto*) callers can decide whether to
+    exit with a distinct non-zero code instead of the generic failure code."""
     if not records:
         print("❌ No records parsed — check delimiters / input file. Nothing pushed.")
-        return
+        return 0
     failed = []
+    dedup_failure_count = 0
+    seq_cache: Dict[str, int] = {}
     for r in records:
-        success = push_record(r, source_label, url)
+        rec_real_date = r.pop("_real_date", None)
+        rec_ep_number = r.pop("_real_ep_number", None)
+        success, reason = push_record(r, source_label, url, seq_cache, rec_real_date, rec_ep_number)
         if not success:
+            if reason == "dedup-check-failed":
+                dedup_failure_count += 1
+            if reason:
+                r["_fail_reason"] = reason
             failed.append(r)
         time.sleep(0.4)
 
@@ -1080,9 +1199,11 @@ def push_all(records: list, source_label: str, url: str):
                 for k, v in r.items():
                     f.write(f"{k}:: {v}\n")
                 f.write("===INTEL_RECORD_END===\n\n")
-        print(f"⚠️  {len(failed)} record(s) failed — saved to failed_records.txt")
+        print(f"⚠️  {len(failed)} record(s) failed — saved to failed_records.txt"
+              + (f" ({dedup_failure_count} dedup-check-failed)" if dedup_failure_count else ""))
     else:
         print(f"✅ All {len(records)} record(s) pushed successfully.")
+    return dedup_failure_count
 
 PENDING_REVIEW_FILE = SCRIPT_DIR / "audio_review_pending.txt"
 
@@ -1160,7 +1281,7 @@ def main():
     if AUTO_MODE:
         print("\n⚡ Auto-run: Choice 5 (RSS date detection → Show Notes → Notion)")
         try:
-            date_str, youtube_url, transistor_url = get_rss_episode_date()
+            date_str, youtube_url, transistor_url, ep_number = get_rss_episode_date()
         except (RuntimeError, ValueError) as e:
             print(f"❌ Auto pipeline failed: {e}")
             sys.exit(1)
@@ -1197,6 +1318,10 @@ def main():
             print(f"❌ Auto pipeline failed: {e}")
             sys.exit(1)
         records = parse_records(SCRIPT_DIR / "governance_input.txt")
+        for r in records:
+            r["_real_date"] = date_str
+            if ep_number:
+                r["_real_ep_number"] = str(ep_number)
 
         if source_is_audio_ingest:
             write_pending_review(records, url)
@@ -1205,13 +1330,18 @@ def main():
                   f"--push-reviewed to push after confirming.")
         else:
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
-            push_all(records, "Simply Cyber Daily Threat Brief", url)
+            dedup_failures = push_all(records, "Simply Cyber Daily Threat Brief", url)
             if not records and word_count >= 500:
                 print(
                     f"\n⚠️  WARNING: 0 records pushed despite {word_count}-word show notes. "
                     "Claude ran but the parser found no valid INTEL_RECORD blocks. "
                     "Check governance_input.txt and review Claude output for formatting issues."
                 )
+            if dedup_failures:
+                print(f"❌ DEDUP-CHECK-FAILED: {dedup_failures} record(s) could not be "
+                      f"verified against Notion this run — held in failed_records.txt, "
+                      f"NOT assumed new, NOT assumed duplicate.")
+                sys.exit(3)
         return
 
     if AUTO_OTX_MODE:
@@ -1241,7 +1371,12 @@ def main():
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
             all_records.extend(records)
         print(f"\n📋 Pushing {len(all_records)} record(s) to Notion...")
-        push_all(all_records, "AlienVault OTX", "https://otx.alienvault.com")
+        dedup_failures = push_all(all_records, "AlienVault OTX", "https://otx.alienvault.com")
+        if dedup_failures:
+            print(f"❌ DEDUP-CHECK-FAILED: {dedup_failures} record(s) could not be "
+                  f"verified against Notion this run — held in failed_records.txt, "
+                  f"NOT assumed new, NOT assumed duplicate.")
+            sys.exit(3)
         return
 
     if AUTO_BARRICADE_MODE:
@@ -1253,7 +1388,7 @@ def main():
             sys.exit(1)
         if result is None:
             return
-        video_id, _title = result
+        video_id, _title, barricade_date = result
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
             content = get_barricade_intel(url)
@@ -1263,9 +1398,17 @@ def main():
             print(f"❌ Barricade pipeline failed: {e}")
             sys.exit(1)
         records = parse_records(SCRIPT_DIR / "governance_input.txt")
+        if barricade_date:
+            for r in records:
+                r["_real_date"] = barricade_date
         print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
-        push_all(records, "Barricade Cyber", url)
+        dedup_failures = push_all(records, "Barricade Cyber", url)
         BARRICADE_LAST_FILE.write_text(video_id, encoding="utf-8")
+        if dedup_failures:
+            print(f"❌ DEDUP-CHECK-FAILED: {dedup_failures} record(s) could not be "
+                  f"verified against Notion this run — held in failed_records.txt, "
+                  f"NOT assumed new, NOT assumed duplicate.")
+            sys.exit(3)
         return
 
     while True:
@@ -1368,7 +1511,7 @@ def main():
                 print("❌ RSS auto-detect mode disabled in --test.")
                 continue
             try:
-                date_str, _yt, _transistor = get_rss_episode_date()
+                date_str, _yt, _transistor, ep_number = get_rss_episode_date()
                 content, url    = get_show_notes(date_str)
                 raw_output      = analyze_with_claude(content, url, date.today().isoformat())
                 write_governance_file(raw_output)
@@ -1376,6 +1519,10 @@ def main():
                 print(f"❌ Pipeline failed: {e}")
                 continue
             records = parse_records(SCRIPT_DIR / "governance_input.txt")
+            for r in records:
+                r["_real_date"] = date_str
+                if ep_number:
+                    r["_real_ep_number"] = str(ep_number)
             print(f"\n📋 Pushing {len(records)} record(s) to Notion...")
             push_all(records, "Simply Cyber Daily Threat Brief", url)
 
