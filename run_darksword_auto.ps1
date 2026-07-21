@@ -4,7 +4,9 @@
 
 $ScriptDir = "C:\Work\GRC\darksword"
 $Python    = "C:\Work\GRC\.venv\Scripts\python.exe"
-$LogFile   = Join-Path $ScriptDir "darksword_$(Get-Date -Format 'yyyy-MM-dd').log"
+$LogDir    = Join-Path $ScriptDir "logs"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+$LogFile   = Join-Path $LogDir "darksword_$(Get-Date -Format 'yyyy-MM-dd').log"
 
 function Write-Log ($msg) {
     $line = "[$(Get-Date -Format 'HH:mm:ss')] $msg"
