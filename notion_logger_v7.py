@@ -1160,15 +1160,23 @@ def push_record(record: dict, source_label: str, url: str, seq_cache: Dict[str, 
         if phase_key in LEARNING_CACHE:
             linked_weeks.add(phase_key)
 
-    domains_raw = record.get("control_domains", "") or ""
-    for domain in [d.strip() for d in domains_raw.split(",")]:
-        for week in DOMAIN_TO_WEEKS.get(domain, []):
-            linked_weeks.add(week)
-
-    cats_raw = record.get("intel_category", "") or ""
-    for cat in [c.strip() for c in cats_raw.split(",")]:
-        for week in CATEGORY_TO_WEEKS.get(cat, []):
-            linked_weeks.add(week)
+    # removed 2026-07-21 — undocumented bulk fanout. DOMAIN_TO_WEEKS/
+    # CATEGORY_TO_WEEKS unioned every control_domains/intel_category tag hit
+    # into this relation with no cap or relevance check, against
+    # canonical_schema_v1.md's "one deliberately-chosen link per week"
+    # doctrine. Found via live-data audit: 14/64 weeks non-empty, 13-123
+    # links each, near-zero topical relevance on manual sampling. Dicts left
+    # in place (lines 167-194) in case there's another use for them — only
+    # this usage is removed.
+    # domains_raw = record.get("control_domains", "") or ""
+    # for domain in [d.strip() for d in domains_raw.split(",")]:
+    #     for week in DOMAIN_TO_WEEKS.get(domain, []):
+    #         linked_weeks.add(week)
+    #
+    # cats_raw = record.get("intel_category", "") or ""
+    # for cat in [c.strip() for c in cats_raw.split(",")]:
+    #     for week in CATEGORY_TO_WEEKS.get(cat, []):
+    #         linked_weeks.add(week)
 
     if linked_weeks:
         relation_ids = [
