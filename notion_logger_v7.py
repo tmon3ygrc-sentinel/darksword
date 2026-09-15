@@ -207,6 +207,7 @@ SELECT_FIELDS = {
 
 MULTI_SELECT_FIELDS = {
     "attack_tactic",
+    "attack_context",
     "impacted_identity_provider",
     "content_type", "cpe_category", "kill_chain_phase",
     "attack_techniques", "target_sector",
@@ -273,6 +274,7 @@ exploit_maturity::
 kill_chain_phase::
 attack_tactic::
 attack_techniques::
+attack_context::
 risk_severity_score::
 confidence::
 priority_level::
@@ -280,7 +282,6 @@ asset_criticality::
 identity_impact::
 intel_type::
 response_urgency::
-identity_impact::
 detection_opportunities::
 control_domains::
 Master Frameworks(CMMC 2.0 / NIST 800-171)::
@@ -310,12 +311,18 @@ impacted_identity_provider::
 - **intel_category**: malware, vulnerability, campaign, advisory, breach, tooling, threat-actor, governance, risk-management, identity-intelligence, strategic-intelligence, dfir, compliance. Select closest match(es). Do NOT invent new categories.
 - **kill_chain_phase**: reconnaissance, weaponization, delivery, exploitation, installation, command-and-control, actions-on-objectives.
 - **attack_tactic**: MITRE ATT&CK tactics (lowercase, hyphenated).
-- **attack_techniques**: MITRE ATT&CK technique IDs (UPPERCASE, e.g., T1190, T1059).
+- **attack_techniques**: Named MITRE ATT&CK techniques only. Use official ATT&CK
+  technique names (e.g., Phishing, Credential Dumping, Lateral Movement, Ransomware
+  Deployment, Supply Chain Compromise). Max 5. Comma-separated.
+- **attack_context**: Operational/contextual threat descriptors that do NOT have a
+  direct ATT&CK technique name (e.g., DDoS-as-a-Service, Living-off-the-Land,
+  AI-assisted Intelligence Gathering, Telegram Coalition Coordination, Hacktivism,
+  Disinformation Operations). Max 4. Comma-separated.
 - **intel_type**: tactical, strategic, or operational.
 - **asset_criticality**: tier-zero, high, medium, low.
 - **identity_impact**: Write 1-2 analyst sentences describing which identity types are impacted and how. Focus on blast radius and authentication context.
 - **response_urgency**: immediate-action, scheduled, monitor, strategic-review.
-- **cisa_kev**: Explicitly "yes", "no", or "unknown".
+- **cisa_kev**: Explicitly "yes", "no", or "unknown". Use "no" (not "unknown") whenever the story has no CVE/vulnerability angle at all, or when a CVE exists but is confirmed not in CISA's KEV catalog. Reserve "unknown" strictly for a story where a specific CVE is involved but its KEV-catalog status genuinely could not be determined.
 - **confidence**: High, Medium, or Low.
 - **priority_level**: Critical, High, Medium, or Low.
 - **exploit_maturity**: poc, functional, weaponized, living-off-the-land, automated, theoretical, unknown.
@@ -330,10 +337,11 @@ impacted_identity_provider::
 - **GRC_Learning_Plan_All_Phases**: Map to the most relevant week: "Week ## - [title]". Options: Week 25 - Developing security policies, Week 26 - Building compliance programs, Week 27 - Risk management frameworks. Leave blank if no match.
 - **identity_impact**: Who is impacted (comma-separated). Values: workforce-accounts, administrative-roles, system-administrators, security-operations, service-accounts, non-human-identities, executive-accounts, third-party-vendors, none, unknown.
 - **tags**: ALL MITRE IDs (lowercase) AND descriptive keywords (lowercase-hyphenated).
-- **story_type**: MUST be exactly one of: incident, vulnerability, advisory, strategic, legal-regulatory.
-- **threat_actor**: Name(s) of the threat actor(s) or group(s), comma-separated if multiple. Proper noun only, exactly as commonly reported (e.g., "LockBit", "Salt Typhoon", "ShinyHunters") — one name per comma-separated entry. If attribution is not to a named actor, use exactly one of: unknown, unattributed, nation-state, state-sponsored, e-crime, insider, hacktivist. Do NOT add parenthetical commentary or confidence/sourcing qualifiers to this field (no "(unconfirmed)", "(suspected)", "(sanctioned)", "(multiple subscribers)", etc.) — put any attribution confidence, sourcing, or legal/sanctions caveats in key_takeaways instead.
+- **story_type**: REQUIRED — never omit this field. MUST be exactly one of: incident, vulnerability, advisory, strategic, legal-regulatory.
+- **threat_actor**: Name(s) of the threat actor(s) or group(s), comma-separated if multiple. Proper noun only, exactly as commonly reported (e.g., "LockBit", "Salt Typhoon", "ShinyHunters") — one name per comma-separated entry. If attribution is not to a named actor, use exactly one of: unattributed, nation-state, state-sponsored, e-crime, insider, hacktivist. Use "unattributed" as the single canonical token for "no named actor identified" — do NOT use "unknown" here (that word is reserved for the separate "None" case below). Use "None" instead, not "unattributed", when the story has no adversarial actor at all (e.g., a regulatory change, a vendor advisory with no exploitation). Do NOT add parenthetical commentary or confidence/sourcing qualifiers to this field (no "(unconfirmed)", "(suspected)", "(sanctioned)", "(multiple subscribers)", etc.) — put any attribution confidence, sourcing, or legal/sanctions caveats in key_takeaways instead.
 - **target_sector**: Industry/sector(s) targeted, comma-separated if multiple. Values: healthcare, financial-services, government, education, energy, critical-infrastructure, technology, telecommunications, retail, manufacturing, defense, legal, media, non-profit, consumer, unknown. Do NOT add parenthetical commentary — use "unknown" if unclear.
 - **key_takeaways**: 2-4 analyst sentences (plain text, no bullet characters) capturing the most actionable insights. Include any attribution confidence, sourcing, or qualifying caveats here (e.g., unconfirmed attribution, sanctions status, subscriber/victim counts) rather than embedding them in threat_actor or target_sector.
+- **operational_relevance**: REQUIRED — never omit this field. Recommended defensive/response actions a GRC or security team should take in response to this story, as short imperative statements separated by semicolons (e.g., "Implement strict conditional access policies for device code flows; Restrict third-party OAuth application permissions to minimum viable scope."). Distinct from detection_opportunities (how to spot it) — this is what to DO about it.
 - **executive_summary**: Exactly 3 sentences.
 - **dfir_phase**: initial-triage, containment, eradication, recovery. Use "None" if not active incident.
 - **investigation_type**: threat-hunt, incident-response, vulnerability-assessment, compliance-review. Use "None" if not applicable.
@@ -959,7 +967,8 @@ def load_cmmc_cache(retries: int = 3, delay: int = 15):
                     mat_prop  = props.get("Maturity", {}).get("select") or {}
                     maturity  = mat_prop.get("name", "").strip()
                     if nist_ref:
-                        CMMC_CACHE[nist_ref].append((maturity, page["id"]))
+                        nist_ref_key = re.sub(r'\s.*$', '', nist_ref)  # strip " (Rev 2)" and any other annotation
+                        CMMC_CACHE[nist_ref_key].append((maturity, page["id"]))
                 has_more = res.get("has_more", False)
                 cursor   = res.get("next_cursor")
             cached_rows = sum(len(v) for v in CMMC_CACHE.values())
