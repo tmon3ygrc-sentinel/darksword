@@ -48,6 +48,7 @@ Plain prose with the sections above. Keep it concise — this is a daily ops dig
 The source show (Simply Cyber) sometimes goes dark for holidays — no episode means no log, which is expected, not a pipeline failure. Maintain this list and extend it as the user tells you about upcoming hiatuses:
 
 - 2026-07-03, 2026-07-04, 2026-07-05, 2026-07-06 — July 4th holiday weekend (per user note 2026-07-03; show confirmed dark, no episode)
+- 2026-09-07 — Labor Day (per user note 2026-09-07; Dr. Auger/Simply Cyber off for the holiday, no new episode expected)
 
 When the user mentions a future hiatus in conversation, a scheduled-task update should append the new date(s) and reason to this list.
 
