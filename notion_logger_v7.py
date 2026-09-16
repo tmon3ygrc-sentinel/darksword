@@ -439,9 +439,20 @@ def split_top_level(val: str) -> list:
     return items
 
 def to_multi(val: str) -> list:
-    """Splits a string into Notion multi_select blocks on top-level commas only."""
+    """Splits a string into Notion multi_select blocks on top-level commas only.
+    A comma trapped inside a parenthetical (e.g. "Browser-based session stores
+    (Chrome, Edge)") is correctly kept as part of one item by split_top_level(),
+    but Notion's multi_select API rejects ANY comma inside a single option
+    name outright — so any comma surviving within an item after the top-level
+    split is replaced with "/" rather than sent through as-is."""
     items = [x.strip() for x in split_top_level(str(val))]
-    return [{"name": i} for i in items if i]
+    cleaned = []
+    for i in items:
+        i = re.sub(r',\s*', '/', i)
+        i = re.sub(r'\s{2,}', ' ', i).strip()
+        if i:
+            cleaned.append(i)
+    return [{"name": i} for i in cleaned]
 
 def scrub(text: str) -> str:
     """
