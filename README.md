@@ -328,10 +328,10 @@ Every CPE Tracker record is automatically linked to relevant GRC learning plan w
 - [x] Darknet Diaries ingest — 168/173 episodes pushed to STAR (2026-08)
 - [x] CrowdStrike Adversary Universe ingest — 7 adversary episodes, Whisper transcription (2026-08)
 - [x] Master Frameworks expanded to 145 controls via FORGE Track 1 (2026-08)
-- [ ] `run_darksword_darknetdiaries.ps1` — Task Scheduler wrapper for DD incremental runs
-- [ ] Cybernews 88-episode backfill — one-time historical sweep (feed parked, data valid)
-- [ ] CrowdStrike incremental monitoring — title classifier for new adversary-profile episodes
-- [ ] `load_cmmc_cache()` root cause trace — SR.L2-3.15.2 4x recurrence, debug-print needed
+- [x] `run_darksword_darknetdiaries.ps1` — Task Scheduler wrapper for DD incremental runs
+- [x] Cybernews 88-episode backfill — one-time historical sweep (feed parked, data valid)
+- [x] CrowdStrike incremental monitoring — title classifier for new adversary-profile episodes
+- [x] `load_cmmc_cache()` root cause trace — SR.L2-3.15.2 4x recurrence, debug-print needed
 
 ---
 
