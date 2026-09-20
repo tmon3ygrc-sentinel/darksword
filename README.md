@@ -31,7 +31,7 @@ Handoff	governance_input.txt	in-memory, no intermediate file
 Engine	notion_logger_v7.py (DARKSWORD Engine)	Claude extraction writes directly
 Destinations	CPE Tracker DB, then Master Frameworks DB (474 controls — CMMC 2.0, NIST 800-171, NIST CSF 2.0, ISO 27001, PCI DSS, SOC 2, NY DFS 500, Reg S-P, SEC Cyber Rules 2023) and GRC Learning Plan DB	STAR_STRATEGY_DB_V2 and Threat Actor Registry
 
-Static diagram (rendered infographic)
+[Interactive pipeline diagram](docs/assets/darksword-pipeline.html)
 
 ## Databases (Notion)
 Database	Script	Source	Purpose
