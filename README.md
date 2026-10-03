@@ -111,7 +111,7 @@ class ENG,EX engine;
 class CPE,MF,GRC,STAR,TAR,TTPR,MAL db;
 ```
 
-[Interactive version](docs/assets/darksword-pipeline.html)
+[Interactive version](https://tmon3ygrc-sentinel.github.io/darksword/assets/darksword-pipeline.html)
 
 </details>
 
