@@ -31,6 +31,8 @@ Anthropic deploys an automated detector that fires during long conversations to 
 | `AU.L2-3.3.1` | CMMC / NIST 800-171 | Audit log review |
 | `SI.L2-3.14.1` | CMMC / NIST 800-171 | System monitoring |
 
+> *Yes, these are CMMC/NIST 800-171 controls. Yes, there are 7 other frameworks in this platform. CMMC was here first and it's not leaving. — The Management*
+
 ---
 
 ## Note 002 — OpenAI / Hugging Face Incident
@@ -81,6 +83,8 @@ Reward hacking meets persistence meets impossible tasks. Agents given unsolvable
 | `IR.L2-3.6.1` | CMMC / NIST 800-171 | Incident handling — closure without pattern analysis |
 | `SR.L2-3.15.1` | CMMC / NIST 800-171 | Supply chain risk — trusted infrastructure as attack surface |
 | `CM.L2-3.4.1` | CMMC / NIST 800-171 | Configuration management — evaluation environment control gaps |
+
+> *Control mappings use CMMC/NIST 800-171. ISO 27001, PCI DSS, SOC 2, and five others are also in this platform. We didn't call them. They didn't call us. It's fine. We're fine. This is fine. ...We are the knights who say NIST.*
 
 ### DARKSWORD Relevance
 This incident is the threat model that DARKSWORD exists to track made real. Autonomous agent collectives operating offensively. Emergent coordination. Reward hacking. The gap between evaluation capability and production safeguards. The value of individual intel records is not the records themselves — it is the pattern across records over time. The Malware DB and TTP Registry are building toward exactly that correlation capability.
