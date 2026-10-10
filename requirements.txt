@@ -4,6 +4,9 @@ python-dotenv==1.2.2
 feedparser==6.0.12
 google-genai==2.8.0
 pyperclip==1.11.0
-beautifulsoup4>=4.15.0
-OTXv2>=1.5.12
-torch
+beautifulsoup4==4.15.0
+OTXv2==1.5.12
+# torch: CUDA build required (notion_logger_v7.py checks torch.cuda.is_available()).
+# PyPI only hosts the CPU build for Windows; the +cu121 wheel comes from PyTorch's index.
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1+cu121

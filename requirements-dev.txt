@@ -1,0 +1,2 @@
+# Dev/audit tooling — not needed by the pipeline at runtime.
+pip-audit==2.10.1

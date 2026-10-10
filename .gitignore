@@ -48,6 +48,7 @@ client_secrets.json
 token.pickle
 barricade_last_ingested.txt
 !requirements.txt
+!requirements-dev.txt
 !prompts/*.md
 
 # DB exports / backups — never commit (public repo)
