@@ -1,0 +1,52 @@
+# DARKSWORD security CI — server-side backstop for the local pre-commit hook.
+# The hook only runs where core.hooksPath is set and can be bypassed with
+# --no-verify; this runs on GitHub for every push regardless.
+# Detective control: alerts on failure, does not block pushes (no branch protection).
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 12 * * 1"   # weekly: catch new CVEs in unchanged pins
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions pinned to commit SHAs, not tags — a moved tag can't swap code under us.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # full history for gitleaks
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Compile check
+        run: python -m compileall -q .
+
+      - name: Secret scan (full history)
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$tarball" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" gitleaks
+          ./gitleaks git . --redact --no-banner
+
+      - name: Dependency CVE audit
+        # --no-deps audits the pinned set without installing it (torch+cu121 is
+        # ~2.5 GB and not on PyPI, so pip-audit skips it — known, accepted gap).
+        run: |
+          pip install -r requirements-dev.txt
+          pip-audit -r requirements.txt --no-deps --disable-pip
