@@ -10,3 +10,8 @@ OTXv2==1.5.12
 # PyPI only hosts the CPU build for Windows; the +cu121 wheel comes from PyTorch's index.
 --extra-index-url https://download.pytorch.org/whl/cu121
 torch==2.5.1+cu121
+faster-whisper==1.2.1
+youtube-transcript-api==1.2.4
+requests==2.34.2
+# security pin: transitive via requests; 2.7.0 has streaming decompression CVEs
+urllib3==2.8.0
