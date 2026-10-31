@@ -63,3 +63,6 @@ DARKSWORD_RECON_DevSecOps_Review.md
 *backup*
 *.pre-*
 data/
+
+# Timestamped .bak copies (<name>.bak-YYYYMMDD-HHMMSS) slip past *.bak
+*.bak-*
