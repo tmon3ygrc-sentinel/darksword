@@ -111,7 +111,7 @@ class ENG,EX engine;
 class CPE,MF,GRC,STAR,TAR,TTPR,MAL db;
 ```
 
-[Interactive version](https://tmon3ygrc-sentinel.github.io/darksword/assets/darksword-pipeline.html)
+[Interactive version](docs/assets/darksword-pipeline.html)
 
 </details>
 
@@ -132,7 +132,7 @@ C:\Work\GRC\darksword\
 ├── star_threat_ingest.py            ← STAR Strategy pipeline (Barricade legacy + STAR fields)
 ├── darknetdiaries_ingest.py         ← Darknet Diaries → STAR + Threat Actor Registry
 ├── crowdstrike_ingest.py            ← CrowdStrike Adversary Universe → STAR + Registry
-├── gemini_ingest_tool.py            ← Standalone Gemini YouTube transcription tool
+├── gemini_ingest_tool.py            ← Standalone Gemini YouTube transcription tool [⚠️ DEPRECATED — OAuth client retired 2026-10-31]
 ├── run_darksword_auto.ps1           ← Task Scheduler: Simply Cyber daily
 ├── run_darksword_otx.ps1            ← Task Scheduler: AlienVault OTX
 ├── run_darksword_barricade.ps1      ← Task Scheduler: Barricade Cyber
@@ -168,7 +168,7 @@ Choice	Description	Source Label
 5. RSS Feed Pipeline	RSS auto-detect date → Show Notes → Claude → Notion	Simply Cyber Daily Threat Brief
 6. Barricade Cyber	YouTube URL → Transcript → Claude → Notion	Barricade Cyber
 7. Simply Cyber YouTube	YouTube URL → Transcript → Claude → Notion	Simply Cyber Daily Threat Brief
-8. Gemini YouTube Ingest	YouTube URL → Gemini transcript → Claude → Notion	(user-selected)
+8. Gemini YouTube Ingest	YouTube URL → Gemini transcript → Claude → Notion	(user-selected) ⚠️ DEPRECATED — Google OAuth client retired 2026-10-31; Choice 8 non-functional until OAuth client is recreated
 
 ### Darknet Diaries Pipeline (darknetdiaries_ingest.py)
 Fetches RSS, pulls VTT transcripts, runs Claude extraction per episode, resolves threat actors against the Threat Actor Registry, and pushes to STAR_STRATEGY_DB_V2. 168/173 episodes ingested (173/179 had VTT transcripts, 6 had none).
@@ -296,6 +296,7 @@ Audit and Accountability (AU)	Week 27, Week 28
 - [x] TTP Registry facelift — confidence scoring, legacy mapping, framework bridge (2026-09-19)
 - [x] Malware DB facelift — review controls, actor/framework linkage, 9 views (2026-09-19)
 - [x] Pipeline diagram restored and updated — 7 DBs, 474 controls, 8 frameworks (2026-09-21)
+- [x] Gemini OAuth client retired — Choice 8 deprecated, gemini_ingest_tool.py retained in archive (2026-10-31)
 - [ ] CrowdStrike incremental monitoring — title classifier for new adversary-profile episodes
 - [ ] TTP ↔ Framework mapping population — ATT&CK-to-control mappings (CTID dataset for CMMC rows; per-engagement for SEC frameworks)
 - [ ] Cross-DB review surface — unified triage view across Threat Actor Registry, TTP Registry, Malware DB, Master Frameworks
