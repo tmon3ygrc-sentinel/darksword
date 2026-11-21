@@ -129,6 +129,34 @@ if TEST_MODE:
 else:
     print("✅ Notion + Claude clients initialized")
 
+CLAUDE_MODEL = "claude-sonnet-4-6"   # same model the three call sites use (parked: make them use this constant)
+EXIT_PREFLIGHT_FAILED = 4            # 0/1/3 in use; 2 collides with CPython's own usage-error exit
+
+def preflight_anthropic() -> None:
+    """Fail in seconds, at ~$0, if the Anthropic API will reject this run —
+    before any RSS fetch, download, transcription or Notion write.
+    Fail CLOSED on deterministic errors (a retry gives the same answer);
+    fail OPEN on transient ones (a network blip must not become an outage)."""
+    if TEST_MODE or PUSH_REVIEWED_MODE or PUSH_CORRECTIONS_MODE:
+        return  # these modes never call Claude
+    try:
+        claude.messages.count_tokens(
+            model=CLAUDE_MODEL,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+    except anthropic.APIStatusError as e:
+        if 400 <= e.status_code < 500 and e.status_code != 429:
+            # 401 bad/expired key, 403 no permission, 404 unknown/retired model, 400 bad request
+            print(f"❌ PREFLIGHT-FAILED: {e.status_code} {type(e).__name__} "
+                  f"(request_id={getattr(e, 'request_id', 'n/a')}). Retrying won't help. "
+                  f"Check the key in .env, and check for a shadowing ANTHROPIC_API_KEY in the shell.")
+            sys.exit(EXIT_PREFLIGHT_FAILED)
+        print(f"⚠️  Preflight inconclusive ({e.status_code}) — continuing; real calls will surface any problem.")
+    except (anthropic.APIConnectionError, anthropic.APITimeoutError) as e:
+        print(f"⚠️  Preflight inconclusive ({type(e).__name__}) — continuing.")
+    except Exception as e:
+        print(f"⚠️  Preflight inconclusive (unexpected {type(e).__name__}) — continuing.")
+
 # ===================================================================
 # 2. CACHES
 # ===================================================================
@@ -1582,6 +1610,8 @@ def main():
     else:
         print("     🔴 LIVE MODE  |  API Connected")
     print("="*60)
+
+    preflight_anthropic()
 
     load_cmmc_cache()
 
